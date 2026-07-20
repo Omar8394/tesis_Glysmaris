@@ -35,13 +35,17 @@ class RecetasRepository(CRUDRepository):
     def crear(self, datos: Dict[str, Any]) -> int:
         query = """
             INSERT INTO RECETAS
-            (nombre_receta, tipo_receta, descripcion, fecha_creacion)
-            VALUES (%s, %s, %s, %s)
+            (nombre_receta, tipo_receta, descripcion, costo_ingredientes,
+             rendimiento_cantidad, rendimiento_unidad, fecha_creacion)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
         """
         valores = (
             datos["nombre"],
             datos["tipo"],
             datos.get("descripcion", ""),
+            datos.get("costo_ingredientes", 0),
+            datos.get("rendimiento_cantidad", 1),
+            datos.get("rendimiento_unidad", "unidad"),
             datetime.now(),
         )
         cursor = self._cursor()
@@ -52,13 +56,17 @@ class RecetasRepository(CRUDRepository):
     def actualizar(self, identificador: int, datos: Dict[str, Any]) -> bool:
         query = """
             UPDATE RECETAS
-            SET nombre_receta=%s, tipo_receta=%s, descripcion=%s
+            SET nombre_receta=%s, tipo_receta=%s, descripcion=%s, costo_ingredientes=%s,
+                rendimiento_cantidad=%s, rendimiento_unidad=%s
             WHERE id_receta=%s
         """
         valores = (
             datos["nombre"],
             datos["tipo"],
             datos.get("descripcion", ""),
+            datos.get("costo_ingredientes", 0),
+            datos.get("rendimiento_cantidad", 1),
+            datos.get("rendimiento_unidad", "unidad"),
             identificador,
         )
         cursor = self._cursor()
@@ -85,7 +93,8 @@ class RecetasRepository(CRUDRepository):
 
     def listar(self) -> List[Dict]:
         query = """
-            SELECT id_receta, nombre_receta, tipo_receta, descripcion, fecha_creacion
+            SELECT id_receta, nombre_receta, tipo_receta, descripcion, costo_ingredientes,
+                   rendimiento_cantidad, rendimiento_unidad, fecha_creacion
             FROM RECETAS
             ORDER BY nombre_receta
         """
@@ -95,22 +104,35 @@ class RecetasRepository(CRUDRepository):
 
     def buscar(self, texto: str) -> List[Dict]:
         query = """
-            SELECT id_receta, nombre_receta, tipo_receta, descripcion, fecha_creacion
+            SELECT id_receta, nombre_receta, tipo_receta, descripcion, costo_ingredientes,
+                   rendimiento_cantidad, rendimiento_unidad, fecha_creacion
             FROM RECETAS
             WHERE LOWER(nombre_receta) LIKE LOWER(%s)
             ORDER BY nombre_receta
         """
         cursor = self._cursor()
-        cursor.execute(query, (f"%{texto}%",))
+        cursor.execute(query, (f"{texto}%",))
         return cursor.fetchall()
 
     # ============================================================
     # MÉTODOS ESPECÍFICOS DE RECETAS
     # ============================================================
 
+    def actualizar_costo(self, id_receta: int, costo: float) -> bool:
+        """
+        Actualiza únicamente el costo de ingredientes de una receta,
+        sin tocar nombre/tipo/descripción. Usado para refrescar el costo
+        cuando cambia el precio de un ingrediente en el inventario.
+        """
+        query = "UPDATE RECETAS SET costo_ingredientes = %s WHERE id_receta = %s"
+        cursor = self._cursor()
+        cursor.execute(query, (costo, id_receta))
+        self._commit()
+        return cursor.rowcount > 0
+
     def obtener_por_tipo(self, tipo: str) -> List[Dict]:
         query = """
-            SELECT id_receta, nombre_receta
+            SELECT id_receta, nombre_receta, costo_ingredientes
             FROM RECETAS
             WHERE tipo_receta = %s
             ORDER BY nombre_receta

@@ -54,6 +54,9 @@ class ProduccionWizard(ft.Container):
         self.productos_seleccionados: List[Dict] = []
         self.analisis_realizado = False
         self.analisis_resultados: Dict = {}
+        # id_producto -> "reducir" | "mantener", para recordar qué eligió
+        # el usuario en el Paso 2 cuando el análisis dio resultado parcial.
+        self._decisiones_analisis: Dict[int, str] = {}
         self.datos_planificacion: Dict = {}
 
         # --- Construir componentes por paso ---
@@ -345,13 +348,14 @@ class ProduccionWizard(ft.Container):
                 self.update()
             return
 
-        productos = self.producto_service.buscar(texto)
+        resultado_busqueda = self.producto_service.buscar(texto)
+        productos = resultado_busqueda.datos if resultado_busqueda.exito else []
         self.resultados_busqueda.controls.clear()
         for p in productos[:10]:
             item = ft.Container(
                 content=ft.Row(
                     [
-                        ft.Text(p["nombre_producto"], expand=True),
+                        ft.Text(p["nombre"], expand=True),
                         ft.Text(f"${p.get('precio_venta', 0):.2f}", size=12, color=ft.colors.GREY),
                     ],
                     spacing=10,
@@ -375,7 +379,7 @@ class ProduccionWizard(ft.Container):
 
         self.productos_seleccionados.append({
             "id_producto": producto["id_producto"],
-            "nombre": producto["nombre_producto"],
+            "nombre": producto["nombre"],
             "cantidad": 1,
             "id_presentacion": None,
             "precio": producto.get("precio_venta", 0),
@@ -392,7 +396,8 @@ class ProduccionWizard(ft.Container):
             self._mostrar_error("Busque un producto primero.")
             return
 
-        productos = self.producto_service.buscar(texto)
+        resultado_busqueda = self.producto_service.buscar(texto)
+        productos = resultado_busqueda.datos if resultado_busqueda.exito else []
         if not productos:
             self._mostrar_error("Producto no encontrado.")
             return
@@ -457,6 +462,27 @@ class ProduccionWizard(ft.Container):
         if self.page:
             self.update()
 
+    def _resolver_parcial(self, id_producto: int, decision: str, cantidad: int):
+        """
+        Aplica la decisión del usuario ante un resultado parcial:
+        - "reducir": ajusta la cantidad solicitada a la cantidad máxima
+          posible calculada por el análisis.
+        - "mantener": deja la cantidad como estaba (la orden queda
+          pendiente igual; si llega más stock antes de iniciarla, se
+          podrá fabricar completa).
+        En ambos casos se re-ejecuta el análisis para reflejar el estado
+        actualizado en pantalla.
+        """
+        self._decisiones_analisis[id_producto] = decision
+
+        if decision == "reducir":
+            for p in self.productos_seleccionados:
+                if p["id_producto"] == id_producto:
+                    p["cantidad"] = cantidad
+                    break
+
+        self._ejecutar_analisis()
+
     def _mostrar_analisis(self):
         self.analisis_contenido.controls.clear()
         self.analisis_contenido.controls.append(
@@ -481,7 +507,7 @@ class ProduccionWizard(ft.Container):
                 )
             )
 
-        if self.page:
+        if self.analisis_contenido.page:
             self.analisis_contenido.update()
 
     def _crear_tarjeta_analisis(self, datos: Dict) -> ft.Card:
@@ -528,7 +554,7 @@ class ProduccionWizard(ft.Container):
         if faltantes:
             faltantes_col = ft.Column(spacing=2)
             for falta in faltantes:
-                tipo = "Ingrediente" if falta.get("id_ingrediente") else "Activo"
+                tipo = "Empaque" if falta.get("tipo") == "empaque" else "Ingrediente"
                 nombre_falta = falta.get("nombre", "Desconocido")
                 faltantes_col.controls.append(
                     ft.Text(
@@ -541,6 +567,44 @@ class ProduccionWizard(ft.Container):
             contenido.controls.append(ft.Divider(height=5))
             contenido.controls.append(ft.Text("Faltantes:", weight="bold"))
             contenido.controls.append(faltantes_col)
+
+        # ✅ Cuando el resultado es parcial, el usuario tiene que decidir:
+        # reducir la orden a lo que realmente se puede fabricar, o
+        # mantener la cantidad solicitada a sabiendas de que puede
+        # llegar más stock antes de iniciar la producción (la orden
+        # queda "pendiente" hasta ese momento).
+        if resultado == "parcial" and posible > 0:
+            id_producto = datos.get("id_producto")
+            decision = self._decisiones_analisis.get(id_producto)
+
+            texto_decision = None
+            if decision == "reducir":
+                texto_decision = f"✅ Se va a fabricar {posible} (ajustado)."
+            elif decision == "mantener":
+                texto_decision = f"↪️ Se mantiene la solicitud de {solicitado}."
+
+            contenido.controls.append(ft.Divider(height=5))
+            contenido.controls.append(
+                ft.Row(
+                    [
+                        BotonPrimario(
+                            texto=f"Fabricar solamente {posible}",
+                            on_click=lambda e, ip=id_producto, p=posible: self._resolver_parcial(ip, "reducir", p),
+                            expand=True,
+                            width=None,
+                        ),
+                        BotonSecundario(
+                            texto=f"Conservar solicitud de {solicitado}",
+                            on_click=lambda e, ip=id_producto: self._resolver_parcial(ip, "mantener", solicitado),
+                            expand=True,
+                            width=None,
+                        ),
+                    ],
+                    spacing=AppSpacing.SM,
+                )
+            )
+            if texto_decision:
+                contenido.controls.append(ft.Text(texto_decision, size=12, color=ft.colors.GREY_700))
 
         return ft.Card(
             content=ft.Container(
@@ -655,7 +719,7 @@ class ProduccionWizard(ft.Container):
                 )
             )
 
-        if self.page:
+        if self.resumen_contenido.page:
             self.resumen_contenido.update()
 
     # =========================================================

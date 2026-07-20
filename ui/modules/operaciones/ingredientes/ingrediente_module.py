@@ -201,7 +201,7 @@ class IngredienteModule:
         self.tabla = TablaDatos(columnas=self._columnas, acciones=acciones, seleccionar=self._seleccionar_fila)
 
     def _crear_paginador(self):
-        self.paginador = Paginador(on_change=self._cambiar_pagina, elementos_por_pagina=20)
+        self.paginador = Paginador(on_change=self._cambiar_pagina, elementos_por_pagina=5)
 
     # ============================================================
     # CARGA DE DATOS
@@ -253,9 +253,7 @@ class IngredienteModule:
                 self.page.update()
 
     def _paginar(self, datos):
-        """✅ Antes se mostraban TODOS los resultados sin importar la página
-        elegida; el paginador solo era un contador decorativo. Ahora sí
-        recorta según la página actual."""
+    
         if not self.paginador:
             return datos
         por_pagina = self.paginador.elementos_por_pagina

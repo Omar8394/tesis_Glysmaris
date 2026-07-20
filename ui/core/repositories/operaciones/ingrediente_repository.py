@@ -74,7 +74,7 @@ class IngredienteRepository(CRUDRepository):
         valores = []
         if filtro:
             query += " AND i.nombre_ingrediente LIKE %s"
-            valores.append(f"%{filtro}%")
+            valores.append(f"{filtro}%")
             
         # PEPS: El lote que vence primero va arriba de la tabla
         query += " ORDER BY l.fecha_caducidad ASC"
@@ -194,52 +194,102 @@ class IngredienteRepository(CRUDRepository):
         motivo: str,
         descripcion: str = "",
     ) -> bool:
-        """✅ Reemplaza a 'eliminar_lote' (código muerto: nunca se llamaba
-        desde la UI real). Registra una merma/pérdida parcial o total de un
-        lote:
-        - NUNCA borra la fila de LOTES_INVENTARIO. Solo se descuenta
-          'cantidad' de stock_actual (con piso en 0). Si se borrara la fila,
-          la FK de PERDIDAS_INVENTARIO -> LOTES_INVENTARIO (sin CASCADE)
-          rechazaría el DELETE, porque ya existe el registro de la pérdida
-          apuntando a ese lote.
-        - Como listar() ya filtra 'WHERE stock_actual > 0', un lote en 0
-          desaparece solo de la tabla — el usuario ve el mismo resultado
-          que un "borrado", pero el historial de pérdidas queda intacto
-          para reportes futuros (y el lote en sí, por si hace falta auditar).
-        - costo_perdida se calcula acá con el costo_unitario real del lote,
-          no con uno que pueda llegar desactualizado desde la UI.
+        """
+        Registra una merma/baja de un lote. Siempre guarda una fila en
+        PERDIDAS_INVENTARIO con nombre_ingrediente/unidad_medida "congelados"
+        en el momento (no solo el id_lote), para que el historial de
+        pérdidas siga siendo útil para reportes aunque el lote (o el
+        ingrediente) se borre después.
+
+        Hay dos comportamientos según el motivo:
+        - 'error_registro' (el usuario cargó el lote por error, no es una
+          merma real): se elimina el lote POR COMPLETO de LOTES_INVENTARIO
+          (no solo se pone stock en 0), sin importar la cantidad recibida.
+          Si ese era el último lote del ingrediente, también se elimina el
+          ingrediente maestro, para que si se vuelve a cargar más adelante
+          se trate como uno nuevo en vez de ofrecer "agregar otro lote".
+        - cualquier otro motivo (caducidad, daño, otro): comportamiento
+          original -- se descuenta 'cantidad' de stock_actual (con piso en
+          0) y el lote se mantiene, para conservar el historial real de
+          inventario físico.
         """
         cursor = self._cursor()
 
         cursor.execute(
-            "SELECT stock_actual, costo_unitario FROM LOTES_INVENTARIO WHERE id_lote = %s",
+            """
+            SELECT l.id_ingrediente, l.stock_actual, l.costo_unitario,
+                   i.nombre_ingrediente, i.unidad_medida
+            FROM LOTES_INVENTARIO l
+            JOIN INGREDIENTES i ON i.id_ingrediente = l.id_ingrediente
+            WHERE l.id_lote = %s
+            """,
             (id_lote,),
         )
         lote = cursor.fetchone()
         if not lote:
             return False
 
+        id_ingrediente = lote["id_ingrediente"]
         stock_actual = float(lote["stock_actual"])
         costo_unitario = float(lote["costo_unitario"])
-        cantidad = min(cantidad, stock_actual)  # nunca descontar más de lo que hay
-        costo_perdida = round(cantidad * costo_unitario, 2)
 
-        cursor.execute(
-            "UPDATE LOTES_INVENTARIO SET stock_actual = stock_actual - %s WHERE id_lote = %s",
-            (cantidad, id_lote),
-        )
+        # Un error de registro siempre se corrige eliminando el lote
+        # completo, sin importar qué cantidad haya tipeado el usuario.
+        if motivo == "error_registro":
+            cantidad = stock_actual
+        else:
+            cantidad = min(cantidad, stock_actual)  # nunca descontar más de lo que hay
+
+        costo_perdida = round(cantidad * costo_unitario, 2)
 
         cursor.execute(
             """
             INSERT INTO PERDIDAS_INVENTARIO
-                (id_lote, cantidad, motivo, descripcion, costo_perdida)
-            VALUES (%s, %s, %s, %s, %s)
+                (id_lote, nombre_ingrediente, unidad_medida, cantidad, motivo, descripcion, costo_perdida)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             """,
-            (id_lote, cantidad, motivo, descripcion, costo_perdida),
+            (
+                id_lote, lote["nombre_ingrediente"], lote["unidad_medida"],
+                cantidad, motivo, descripcion, costo_perdida,
+            ),
         )
 
+        if motivo == "error_registro":
+            cursor.execute("DELETE FROM LOTES_INVENTARIO WHERE id_lote = %s", (id_lote,))
+        else:
+            cursor.execute(
+                "UPDATE LOTES_INVENTARIO SET stock_actual = stock_actual - %s WHERE id_lote = %s",
+                (cantidad, id_lote),
+            )
+
         self._commit()
+
+        if motivo == "error_registro":
+            self._eliminar_ingrediente_si_quedo_sin_lotes(id_ingrediente)
+
         return True
+
+    def _eliminar_ingrediente_si_quedo_sin_lotes(self, id_ingrediente: int) -> None:
+        """
+        Tras eliminar un lote por error de registro, si no le quedan más
+        lotes a ese ingrediente, se borra también el ingrediente maestro.
+        Si el ingrediente sigue en uso (le queda otro lote, o está
+        referenciado en alguna receta), simplemente se deja como está --
+        no es un error, solo significa que el ingrediente sigue vigente.
+        """
+        cursor = self._cursor()
+        cursor.execute(
+            "SELECT COUNT(*) AS total FROM LOTES_INVENTARIO WHERE id_ingrediente = %s",
+            (id_ingrediente,),
+        )
+        if cursor.fetchone()["total"] > 0:
+            return
+        try:
+            cursor.execute("DELETE FROM INGREDIENTES WHERE id_ingrediente = %s", (id_ingrediente,))
+            self._commit()
+        except Exception:
+            # Referenciado en alguna receta u otra tabla -- se deja como está.
+            pass
 
     def eliminar(self, identificador: int) -> bool:
         cursor = self._cursor()
@@ -274,3 +324,62 @@ class IngredienteRepository(CRUDRepository):
         )
         row = cursor.fetchone()
         return float(row["total"]) if row else 0.0
+
+    def descontar_stock_peps(self, id_ingrediente: int, cantidad: float) -> Optional[List[Dict]]:
+        """
+        Descuenta 'cantidad' del ingrediente en orden PEPS (el lote que
+        vence primero se consume primero), usado al iniciar una orden de
+        producción.
+
+        Devuelve la lista de lotes afectados
+        [{"id_lote": ..., "cantidad_descontada": ...}, ...] para poder
+        revertir el descuento más adelante si la orden se cancela (ver
+        devolver_stock_lote). Si el stock total disponible es menor que
+        'cantidad', no descuenta nada y devuelve None.
+        """
+        cursor = self._cursor()
+        cursor.execute(
+            """
+            SELECT id_lote, stock_actual FROM LOTES_INVENTARIO
+            WHERE id_ingrediente = %s AND stock_actual > 0
+            ORDER BY fecha_caducidad ASC
+            """,
+            (id_ingrediente,),
+        )
+        lotes = cursor.fetchall()
+
+        disponible = sum(float(l["stock_actual"]) for l in lotes)
+        if disponible < cantidad:
+            return None
+
+        restante = cantidad
+        afectados: List[Dict] = []
+        for lote in lotes:
+            if restante <= 0:
+                break
+            stock_lote = float(lote["stock_actual"])
+            tomar = min(stock_lote, restante)
+            cursor.execute(
+                "UPDATE LOTES_INVENTARIO SET stock_actual = stock_actual - %s WHERE id_lote = %s",
+                (tomar, lote["id_lote"]),
+            )
+            afectados.append({"id_lote": lote["id_lote"], "cantidad_descontada": tomar})
+            restante -= tomar
+
+        self._commit()
+        return afectados
+
+    def devolver_stock_lote(self, id_lote: int, cantidad: float) -> bool:
+        """
+        Repone 'cantidad' al stock_actual de un lote específico. Se usa al
+        cancelar una orden de producción que ya había descontado inventario
+        (estado 'en_proceso'): se repone exactamente a los mismos lotes de
+        los que se tomó, usando el registro de PRODUCCION_INGREDIENTES_RESERVADOS.
+        """
+        cursor = self._cursor()
+        cursor.execute(
+            "UPDATE LOTES_INVENTARIO SET stock_actual = stock_actual + %s WHERE id_lote = %s",
+            (cantidad, id_lote),
+        )
+        self._commit()
+        return cursor.rowcount > 0

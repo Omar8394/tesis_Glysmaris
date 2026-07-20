@@ -57,7 +57,9 @@ SCHEMA_OPERACIONES = [
     """
     CREATE TABLE IF NOT EXISTS PERDIDAS_INVENTARIO (
         id_perdida INT AUTO_INCREMENT PRIMARY KEY,
-        id_lote INT NOT NULL,
+        id_lote INT NULL,
+        nombre_ingrediente VARCHAR(100),
+        unidad_medida VARCHAR(30),
         cantidad DECIMAL(10,2) NOT NULL,
         motivo ENUM(
             'error_registro',
@@ -69,7 +71,7 @@ SCHEMA_OPERACIONES = [
         descripcion TEXT,
         costo_perdida DECIMAL(10,2),
         fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (id_lote) REFERENCES LOTES_INVENTARIO(id_lote)
+        FOREIGN KEY (id_lote) REFERENCES LOTES_INVENTARIO(id_lote) ON DELETE SET NULL
     )
     """,
 
@@ -82,6 +84,9 @@ SCHEMA_OPERACIONES = [
         nombre_receta VARCHAR(100) NOT NULL,
         tipo_receta VARCHAR(50) NOT NULL,
         descripcion TEXT,
+        costo_ingredientes DECIMAL(10,2) NOT NULL DEFAULT 0,
+        rendimiento_cantidad DECIMAL(10,2) NOT NULL DEFAULT 1,
+        rendimiento_unidad VARCHAR(30) NOT NULL DEFAULT 'unidad',
         fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
     )
     """,

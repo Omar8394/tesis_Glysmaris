@@ -54,6 +54,8 @@ class CampoTexto(ft.TextField):
 
         error_text=None,
 
+        visible : bool = True,
+
     ):
 
         tema = ThemeManager.theme
@@ -105,6 +107,8 @@ class CampoTexto(ft.TextField):
             cursor_color=tema.primary,
 
             error_text=error_text,
+
+            visible=visible,
 
         )
 

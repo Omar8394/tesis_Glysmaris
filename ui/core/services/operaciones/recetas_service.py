@@ -14,6 +14,7 @@ Flujo: Ingredientes → Recetas (costo de ingredientes) → Productos (mano de o
 
 from __future__ import annotations
 
+import re
 import uuid
 from typing import List, Dict, Optional
 
@@ -22,6 +23,52 @@ from ui.core.services.base.service_result import ServiceResult
 from ui.core.repositories.operaciones.ingrediente_repository import IngredienteRepository
 
 ORIGENES_VALIDOS = ("propio", "base", "relleno", "cobertura")
+
+# ==========================================================
+# UNIDADES DE MEDIDA
+# ==========================================================
+# Cada unidad se clasifica por categoría (masa, volumen, conteo) y se
+# guarda su factor de conversión hacia la unidad canónica de su
+# categoría (gramo, mililitro, unidad respectivamente). Convertir entre
+# dos unidades de la MISMA categoría es: cantidad * factor_origen / factor_destino.
+#
+# IMPORTANTE: si una unidad no está en este mapa, o si se intenta
+# convertir entre categorías distintas (ej. "g" a "unidad"), se levanta
+# un error explícito en vez de asumir un factor de 1 en silencio. Ese
+# "factor 1 por defecto" era la causa del bug de precios inflados: una
+# unidad mal escrita (p.ej. "gr" en vez de "g") no hacía match en el
+# diccionario viejo y la cantidad en gramos se multiplicaba directo por
+# el costo por kilogramo.
+UNIDADES_CANONICAS = {
+    # Masa -> gramo
+    "g": ("masa", 1), "gr": ("masa", 1), "grs": ("masa", 1),
+    "gramo": ("masa", 1), "gramos": ("masa", 1),
+    "kg": ("masa", 1000), "kgs": ("masa", 1000),
+    "kilo": ("masa", 1000), "kilos": ("masa", 1000),
+    "kilogramo": ("masa", 1000), "kilogramos": ("masa", 1000),
+    "mg": ("masa", 0.001), "miligramo": ("masa", 0.001), "miligramos": ("masa", 0.001),
+    "lb": ("masa", 453.592), "lbs": ("masa", 453.592),
+    "libra": ("masa", 453.592), "libras": ("masa", 453.592),
+    "oz": ("masa", 28.3495), "onza": ("masa", 28.3495), "onzas": ("masa", 28.3495),
+
+    # Volumen -> mililitro
+    "ml": ("volumen", 1), "mls": ("volumen", 1),
+    "mililitro": ("volumen", 1), "mililitros": ("volumen", 1),
+    "l": ("volumen", 1000), "lt": ("volumen", 1000), "lts": ("volumen", 1000),
+    "litro": ("volumen", 1000), "litros": ("volumen", 1000),
+    "cucharada": ("volumen", 14.7868), "cucharadas": ("volumen", 14.7868),
+    "cda": ("volumen", 14.7868), "cdas": ("volumen", 14.7868),
+    "cucharadita": ("volumen", 4.92892), "cucharaditas": ("volumen", 4.92892),
+    "cdta": ("volumen", 4.92892), "cdtas": ("volumen", 4.92892),
+    "taza": ("volumen", 236.588), "tazas": ("volumen", 236.588),
+    "1/2 taza": ("volumen", 118.294),
+    "1/3 taza": ("volumen", 78.8627),
+    "1/4 taza": ("volumen", 59.1471),
+
+    # Conteo -> unidad
+    "unidad": ("conteo", 1), "unidades": ("conteo", 1), "u": ("conteo", 1),
+    "docena": ("conteo", 12), "docenas": ("conteo", 12),
+}
 
 
 class RecetasService(CRUDService):
@@ -51,6 +98,19 @@ class RecetasService(CRUDService):
         if not ingredientes:
             errores["ingredientes"] = "Debe agregar al menos un ingrediente."
 
+        rendimiento_unidad = (datos.get("rendimiento_unidad") or "").strip()
+        if not rendimiento_unidad:
+            errores["rendimiento_unidad"] = "Debe indicar la unidad de rendimiento."
+        elif self._normalizar_unidad(rendimiento_unidad) not in UNIDADES_CANONICAS:
+            errores["rendimiento_unidad"] = f"Unidad de rendimiento no reconocida: '{rendimiento_unidad}'."
+
+        try:
+            rendimiento_cantidad = float(datos.get("rendimiento_cantidad", 0) or 0)
+            if rendimiento_cantidad <= 0:
+                errores["rendimiento_cantidad"] = "El rendimiento debe ser mayor a 0."
+        except (TypeError, ValueError):
+            errores["rendimiento_cantidad"] = "El rendimiento debe ser un número."
+
         if errores:
             return ServiceResult.error(
                 "Revisá los datos de la receta.",
@@ -63,18 +123,29 @@ class RecetasService(CRUDService):
         if resultado.fallo:
             return resultado
 
+        ingredientes_raw = datos.get("ingredientes") or []
+
+        try:
+            costo_ingredientes = self.calcular_subtotal(ingredientes_raw)
+        except ValueError as e:
+            return ServiceResult.error(
+                "No se pudo calcular el costo de la receta.",
+                errores={"ingredientes": str(e)},
+            )
+
         try:
             id_receta = self.repo.crear({
                 "nombre": datos.get("nombre", "").strip(),
                 "tipo": datos.get("tipo", "Base"),
                 "descripcion": datos.get("descripcion", ""),
+                "costo_ingredientes": costo_ingredientes,
+                "rendimiento_cantidad": float(datos.get("rendimiento_cantidad", 1) or 1),
+                "rendimiento_unidad": (datos.get("rendimiento_unidad") or "unidad").strip(),
             })
         except Exception as e:
             return ServiceResult.error(f"Error al crear la receta: {str(e)}")
 
-        ingredientes_consolidados = self.consolidar_ingredientes(
-            datos.get("ingredientes") or [],
-        )
+        ingredientes_consolidados = self.consolidar_ingredientes(ingredientes_raw)
         try:
             self.repo.reemplazar_ingredientes(id_receta, ingredientes_consolidados)
         except Exception as e:
@@ -82,7 +153,7 @@ class RecetasService(CRUDService):
 
         return ServiceResult.ok(
             "Receta creada correctamente.",
-            datos={"id_receta": id_receta},
+            datos={"id_receta": id_receta, "costo_ingredientes": costo_ingredientes},
         )
 
     def actualizar(self, identificador: int, datos: dict) -> ServiceResult:
@@ -90,26 +161,40 @@ class RecetasService(CRUDService):
         if resultado.fallo:
             return resultado
 
+        ingredientes_raw = datos.get("ingredientes") or []
+
+        try:
+            costo_ingredientes = self.calcular_subtotal(ingredientes_raw)
+        except ValueError as e:
+            return ServiceResult.error(
+                "No se pudo calcular el costo de la receta.",
+                errores={"ingredientes": str(e)},
+            )
+
         try:
             success = self.repo.actualizar(identificador, {
                 "nombre": datos.get("nombre", "").strip(),
                 "tipo": datos.get("tipo", "Base"),
                 "descripcion": datos.get("descripcion", ""),
+                "costo_ingredientes": costo_ingredientes,
+                "rendimiento_cantidad": float(datos.get("rendimiento_cantidad", 1) or 1),
+                "rendimiento_unidad": (datos.get("rendimiento_unidad") or "unidad").strip(),
             })
             if not success:
                 return ServiceResult.error("No se pudo actualizar la receta.")
         except Exception as e:
             return ServiceResult.error(f"Error al actualizar: {str(e)}")
 
-        ingredientes_consolidados = self.consolidar_ingredientes(
-            datos.get("ingredientes") or [],
-        )
+        ingredientes_consolidados = self.consolidar_ingredientes(ingredientes_raw)
         try:
             self.repo.reemplazar_ingredientes(identificador, ingredientes_consolidados)
         except Exception as e:
             return ServiceResult.error(f"Error al actualizar ingredientes: {str(e)}")
 
-        return ServiceResult.ok("Receta actualizada correctamente.")
+        return ServiceResult.ok(
+            "Receta actualizada correctamente.",
+            datos={"costo_ingredientes": costo_ingredientes},
+        )
 
     def eliminar(self, identificador: int) -> ServiceResult:
         try:
@@ -276,37 +361,126 @@ class RecetasService(CRUDService):
     # COSTOS (solo ingredientes, con conversión de unidades)
     # ==========================================================
 
-    def _obtener_factor_conversion(self, unidad_base: str, unidad_receta: str) -> float:
+    def _normalizar_unidad(self, unidad: str) -> str:
+        return (unidad or "").strip().lower().rstrip(".")
+
+    def convertir_unidad(self, cantidad: float, unidad_origen: str, unidad_destino: str) -> float:
         """
-        Devuelve el factor para convertir de unidad_receta a unidad_base.
-        Ej: de 'g' a 'kg' → 0.001
+        Convierte 'cantidad' de unidad_origen a unidad_destino. Solo funciona
+        entre unidades de la MISMA magnitud (masa con masa, volumen con
+        volumen, conteo con conteo) — no hay conversión entre masa y volumen,
+        porque eso depende de la densidad de cada ingrediente y es una fuente
+        común de error. Si un ingrediente se maneja en inventario en Kg/g,
+        la receta debe cargarlo también en una unidad de masa (g, kg, lb, oz);
+        si se maneja en L/ml, la receta debe usar una unidad de volumen
+        (ml, L, cucharada, taza, etc.); si se maneja por Unidad, la receta
+        debe usar "unidad" o "docena".
+
+        Lanza ValueError si alguna unidad no se reconoce, o si son de
+        magnitudes distintas. Nunca devuelve un factor "por defecto" sin
+        avisar — eso es justo lo que causaba costos inflados en silencio
+        antes de este fix.
         """
-        FACTORES = {
-            # A kg
-            ("kg", "g"): 0.001,
-            ("kg", "kg"): 1.0,
-            ("kg", "lb"): 0.453592,
-            ("kg", "oz"): 0.0283495,
-            # A L
-            ("L", "ml"): 0.001,
-            ("L", "L"): 1.0,
-            ("L", "cucharada"): 0.0147868,
-            ("L", "cucharadita"): 0.00492892,
-            ("L", "taza"): 0.236588,
-            ("L", "1/2 taza"): 0.118294,
-            ("L", "1/3 taza"): 0.0788627,
-            ("L", "1/4 taza"): 0.0591471,
-            # A unidad
-            ("unidad", "unidad"): 1.0,
-            ("unidad", "docena"): 1/12,
-        }
-        key = (unidad_base.lower(), unidad_receta.lower())
-        return FACTORES.get(key, 1.0)
+        origen = self._normalizar_unidad(unidad_origen)
+        destino = self._normalizar_unidad(unidad_destino)
+
+        if origen == destino:
+            return cantidad
+
+        info_origen = UNIDADES_CANONICAS.get(origen)
+        info_destino = UNIDADES_CANONICAS.get(destino)
+
+        if not info_origen or not info_destino:
+            desconocida = unidad_origen if not info_origen else unidad_destino
+            raise ValueError(f"unidad no reconocida: '{desconocida}'")
+
+        categoria_origen, factor_origen = info_origen
+        categoria_destino, factor_destino = info_destino
+
+        if categoria_origen != categoria_destino:
+            raise ValueError(
+                f"la receta usa '{unidad_origen}' pero este ingrediente se maneja en "
+                f"'{unidad_destino}' ({categoria_destino}). Corregí la unidad en la receta "
+                f"para que sea del mismo tipo (masa con masa, volumen con volumen, o "
+                f"conteo con conteo)."
+            )
+
+        cantidad_canonica = cantidad * factor_origen
+        return cantidad_canonica / factor_destino
+
+    def _parsear_contenido_unidad(self, contenido: str) -> Optional[tuple]:
+        """
+        Parsea el campo 'contenido_unidad' del ingrediente (ej. '500 g',
+        '1kg', '750ml') en (cantidad, unidad). Devuelve None si el campo
+        está vacío o no tiene un formato reconocible.
+        """
+        if not contenido:
+            return None
+        match = re.match(r"^\s*([\d]+(?:[.,][\d]+)?)\s*([a-zA-Zñáéíóú]+)\s*$", contenido.strip())
+        if not match:
+            return None
+        cantidad_str, unidad_str = match.groups()
+        try:
+            cantidad = float(cantidad_str.replace(",", "."))
+        except ValueError:
+            return None
+        if cantidad <= 0:
+            return None
+        return cantidad, unidad_str
+
+    def _convertir_a_unidad_base(self, cantidad: float, unidad_receta: str, unidad_base: str, bd: Dict) -> float:
+        """
+        Convierte la cantidad de la receta a la unidad_medida del ingrediente.
+
+        Camino normal: misma magnitud (g<->kg, ml<->L, etc.) -> convertir_unidad directo.
+
+        Camino especial: el ingrediente se compra por 'unidad' (ej. una
+        barra/paquete) pero la receta lo usa por peso o volumen (ej.
+        mantequilla comprada como "1 unidad" que contiene 500 g, usada en
+        la receta como "250 g"). En ese caso se usa el campo
+        contenido_unidad del ingrediente (ej. "500 g") para saber cuánto
+        trae cada unidad comprada, y se calcula qué fracción de esa unidad
+        se está usando en la receta. Esa fracción es lo que se multiplica
+        después por el costo_unitario (que es el costo de UNA unidad
+        completa comprada).
+        """
+        try:
+            return self.convertir_unidad(cantidad, unidad_receta, unidad_base)
+        except ValueError:
+            pass
+
+        contenido = self._parsear_contenido_unidad(bd.get("contenido_unidad", ""))
+        if not contenido:
+            raise ValueError(
+                f"la receta usa '{unidad_receta}' pero este ingrediente se maneja en "
+                f"'{unidad_base}'. Corregí la unidad en la receta, o completá el campo "
+                f"'contenido por unidad' del ingrediente (ej. '500 g') para poder calcular "
+                f"el costo por porción."
+            )
+
+        contenido_cantidad, contenido_unidad_str = contenido
+        try:
+            cantidad_en_unidad_contenido = self.convertir_unidad(cantidad, unidad_receta, contenido_unidad_str)
+        except ValueError:
+            raise ValueError(
+                f"la receta usa '{unidad_receta}' pero el 'contenido por unidad' registrado "
+                f"para este ingrediente está en '{contenido_unidad_str}', que es de otra "
+                f"magnitud. Revisá esos datos."
+            )
+
+        return cantidad_en_unidad_contenido / contenido_cantidad
 
     def calcular_subtotal(self, ingredientes: List[Dict]) -> float:
         """
-        Calcula el subtotal de ingredientes convirtiendo cantidades a la unidad base
-        del ingrediente antes de multiplicar por el costo unitario.
+        Calcula el subtotal de ingredientes convirtiendo cantidades a la unidad
+        en que está valorado cada ingrediente (unidad_medida) antes de
+        multiplicar por su costo_unitario. Si el ingrediente se compra por
+        'unidad' pero la receta lo usa por peso/volumen, usa el campo
+        contenido_unidad para calcular la fracción de esa unidad que se usó.
+
+        Puede lanzar ValueError si algún ingrediente trae una unidad que no
+        se puede resolver de ninguna de las dos formas — esto es intencional:
+        es preferible frenar con un mensaje claro a calcular un costo erróneo.
         """
         todos = self.repo_ingredientes.listar()
         cache = {i["id_ingrediente"]: i for i in todos}
@@ -318,26 +492,60 @@ class RecetasService(CRUDService):
                 continue
 
             costo_unitario = float(bd.get("costo_unitario", 0))
-            unidad_base = bd.get("unidad_medida", "").lower()
+            unidad_base = bd.get("unidad_medida", "")
             cantidad = float(item.get("cantidad", 0))
-            unidad_receta = item.get("unidad", "").lower()
+            unidad_receta = item.get("unidad", "")
 
-            # Convertir a unidad base
-            if unidad_receta and unidad_receta != unidad_base:
-                factor = self._obtener_factor_conversion(unidad_base, unidad_receta)
-                cantidad = cantidad * factor
+            if self._normalizar_unidad(unidad_receta) != self._normalizar_unidad(unidad_base):
+                try:
+                    cantidad = self._convertir_a_unidad_base(cantidad, unidad_receta, unidad_base, bd)
+                except ValueError as e:
+                    nombre = bd.get("nombre_ingrediente", f"id {item['id']}")
+                    raise ValueError(f"{nombre}: {e}") from e
 
             subtotal += cantidad * costo_unitario
 
         return round(subtotal, 2)
 
-    def calcular_precio_sugerido(self, ingredientes: List[Dict], factor: float = 3) -> float:
+    def recalcular_costo(self, identificador: int) -> ServiceResult:
         """
-        Calcula el precio sugerido basado únicamente en el subtotal de ingredientes.
-        El factor 3 es un margen estándar (costo de ingredientes ≈ 33% del precio final).
+        Vuelve a calcular el costo de ingredientes de una receta ya guardada
+        (leyendo sus ingredientes y costos actuales) y lo persiste en la
+        columna costo_ingredientes. Útil para refrescar el costo cuando
+        cambia el precio de algún ingrediente en el inventario, sin tener
+        que reabrir y volver a guardar la receta manualmente.
         """
-        subtotal = self.calcular_subtotal(ingredientes)
-        return round(subtotal * factor, 2)
+        try:
+            ingredientes_bd = self.repo.obtener_ingredientes(identificador)
+        except Exception as e:
+            return ServiceResult.error(str(e))
+
+        ingredientes = [
+            {
+                "id": ing["id_ingrediente"],
+                "cantidad": float(ing["cantidad_necesaria"]),
+                "unidad": ing["unidad"],
+            }
+            for ing in ingredientes_bd
+        ]
+
+        try:
+            costo = self.calcular_subtotal(ingredientes)
+        except ValueError as e:
+            return ServiceResult.error(
+                "No se pudo recalcular el costo de la receta.",
+                errores={"ingredientes": str(e)},
+            )
+
+        try:
+            self.repo.actualizar_costo(identificador, costo)
+        except Exception as e:
+            return ServiceResult.error(f"Error al guardar el costo: {str(e)}")
+
+        return ServiceResult.ok(
+            "Costo recalculado correctamente.",
+            datos={"costo_ingredientes": costo},
+        )
 
     # ==========================================================
     # STOCK

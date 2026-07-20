@@ -60,6 +60,7 @@ class ProductoModule:
         recetas_service=None,
         activo_service=None,
         ingrediente_service=None,
+        parametros_negocio_service=None,
     ):
         self.page = page
         self.content_area = content_area
@@ -70,6 +71,9 @@ class ProductoModule:
         self._recetas_service = recetas_service
         self._activo_service = activo_service
         self._ingrediente_service = ingrediente_service
+        self._parametros_negocio_service = (
+            parametros_negocio_service or ServiceFactory.get_parametros_negocio_service()
+        )
 
         self._productos_cache: list[dict] = []
         self._layout_principal = None
@@ -232,6 +236,7 @@ class ProductoModule:
             buscar_empaques=self._buscar_empaques,
             buscar_costos_indirectos=self._buscar_costos_indirectos,
             calcular_preview=self._calcular_preview,
+            obtener_tasas_hora=self._obtener_tasas_hora,
             categorias=self._categorias_disponibles(),
         )
         self._mostrar_wizard(wizard)
@@ -256,6 +261,7 @@ class ProductoModule:
             buscar_empaques=self._buscar_empaques,
             buscar_costos_indirectos=self._buscar_costos_indirectos,
             calcular_preview=self._calcular_preview,
+            obtener_tasas_hora=self._obtener_tasas_hora,
             categorias=self._categorias_disponibles(),
             datos_iniciales=datos_iniciales,
         )
@@ -409,6 +415,24 @@ class ProductoModule:
         mientras el usuario todavía está completando el producto.
         """
         resultado = self._producto_service.calcular_preview(datos)
+        if resultado.fallo:
+            return {}
+        return resultado.datos or {}
+
+    def _obtener_tasas_hora(self) -> dict:
+        """
+        Callback que el wizard usa para calcular mano de obra y costos
+        indirectos a partir del tiempo de preparación (ver
+        ProductoWizard._obtener_tasas_hora). Devuelve el desglose ya
+        calculado por ParametrosNegocioService (costo_hora_trabajo,
+        tasa_servicios_por_hora, tasa_depreciacion_por_hora,
+        costo_hora_total), o {} si no hay servicio configurado o falla
+        la consulta -- el wizard ya sabe mostrar el aviso correspondiente
+        cuando recibe un desglose vacío.
+        """
+        if not self._parametros_negocio_service:
+            return {}
+        resultado = self._parametros_negocio_service.obtener_desglose()
         if resultado.fallo:
             return {}
         return resultado.datos or {}

@@ -177,6 +177,12 @@ class ProductoWizard(ft.Container):
 
         self.presentaciones: list[dict] = list(self.datos_iniciales.get("presentaciones", []))
 
+        # Empaques que se van acumulando mientras se arma UNA presentación
+        # todavía no agregada a self.presentaciones (mismo patrón que
+        # self.componentes: se agrega de a uno con un botón "+", y la
+        # lista se vacía cuando la presentación se confirma).
+        self._empaques_presentacion_actual: list[dict] = []
+
         self.componentes: list[dict] = list(self.datos_iniciales.get("componentes", []))
 
         self.empaques: list[dict] = list(self.datos_iniciales.get("empaques", []))
@@ -673,16 +679,49 @@ class ProductoWizard(ft.Container):
         # ✅ El empaque varía según la presentación (caja para la torta
         # completa, domo para el trozo, etc.), así que se elige acá, a
         # nivel de presentación, y se suma al costo de esa presentación
-        # puntual en vez de a un total genérico del producto.
+        # puntual en vez de a un total genérico del producto. Una
+        # presentación puede llevar VARIOS empaques (caja + cinta + moño,
+        # por ejemplo), así que se agregan de a uno con un botón "+",
+        # igual que los ingredientes de una receta.
         self.autocompletado_presentacion_empaque = AutoCompletado(
 
-            etiqueta="Empaque para esta presentación (opcional)",
+            etiqueta="Empaque",
 
             buscar=self.buscar_empaques,
 
-            width=300,
+            width=260,
 
         )
+
+        self.txt_presentacion_empaque_cantidad = CampoTexto(
+
+            etiqueta="Cantidad",
+
+            width=100,
+
+            value="1",
+
+            keyboard_type=ft.KeyboardType.NUMBER,
+
+        )
+
+        boton_agregar_empaque = ft.IconButton(
+
+            icon=AppIcons.ADD,
+
+            tooltip="Agregar empaque a esta presentación",
+
+            on_click=self._agregar_empaque_presentacion,
+
+        )
+
+        self.tabla_empaques_presentacion = TablaSeleccion(
+
+            columnas=[("nombre", "Empaque"), ("cantidad", "Cantidad")],
+
+        )
+
+        self.tabla_empaques_presentacion.reemplazar(self._empaques_presentacion_actual)
 
         precio_sugerido_inicial = self._precio_sugerido_actual(100, None)
 
@@ -745,7 +784,14 @@ class ProductoWizard(ft.Container):
                 spacing=AppSpacing.CONTROL_SPACING,
             ),
 
-            self.autocompletado_presentacion_empaque,
+            ft.Text("Empaques de esta presentación", weight=AppTypography.MEDIUM, size=AppTypography.SMALL),
+
+            ft.Row(
+                [self.autocompletado_presentacion_empaque, self.txt_presentacion_empaque_cantidad, boton_agregar_empaque],
+                spacing=AppSpacing.CONTROL_SPACING,
+            ),
+
+            self.tabla_empaques_presentacion,
 
             ft.Row(
                 [self.txt_presentacion_precio_sugerido, self.txt_presentacion_precio_manual, boton_agregar],
@@ -775,11 +821,10 @@ class ProductoWizard(ft.Container):
 
     def _controles_torta(self, datos: dict) -> list:
         """
-        Preguntas propias de la categoría "Tortas": tamaño y si se
-        vende (además) por porciones. Son metadatos informativos para
-        precargar la presentación por trozos más abajo (diámetro y
-        cantidad de trozos sugeridos); no reemplazan la carga de cada
-        presentación, que sigue siendo explícita.
+        Pregunta propia de la categoría "Tortas": tamaño físico de la
+        torta (informativo). Si se vende completa o por trozos, y en
+        cuántos, se define por presentación más abajo ("Se vende" +
+        "Cantidad de trozos") -- no se repite acá.
         """
         self.dd_torta_tamano = Selector(
 
@@ -793,32 +838,10 @@ class ProductoWizard(ft.Container):
 
         )
 
-        self.sw_torta_por_porciones = ft.Switch(
-
-            label="¿Se vende por porciones?",
-
-            value=bool(datos.get("torta_vende_por_porciones", False)),
-
-        )
-
-        self.txt_torta_porciones = CampoTexto(
-
-            etiqueta="Cantidad de porciones",
-
-            width=180,
-
-            hint="Ej: 10",
-
-            value=str(datos.get("torta_cantidad_porciones", "") or ""),
-
-            keyboard_type=ft.KeyboardType.NUMBER,
-
-        )
-
         return [
             ft.Text("Detalle de la torta", weight=AppTypography.MEDIUM),
             ft.Row(
-                [self.dd_torta_tamano, self.sw_torta_por_porciones, self.txt_torta_porciones],
+                [self.dd_torta_tamano],
                 spacing=AppSpacing.CONTROL_SPACING,
             ),
         ]
@@ -843,32 +866,51 @@ class ProductoWizard(ft.Container):
                 detalle = f"Trozo ({diametro} cm, 1/{p.get('cantidad_trozos')})" if diametro else f"Trozo (1/{p.get('cantidad_trozos')})"
             else:
                 detalle = "Completa"
-            empaque = p.get("empaque")
+            empaques = p.get("empaques") or []
+            texto_empaques = ", ".join(emp["nombre"] for emp in empaques) if empaques else "-"
             filas.append({
                 "nombre": p.get("nombre"),
                 "detalle": detalle,
-                "empaque": empaque["nombre"] if empaque else "-",
+                "empaque": texto_empaques,
                 "precio": p.get("precio"),
             })
         return filas
 
-    def _empaque_seleccionado_actual(self) -> dict | None:
-        """Lee el empaque elegido (todavía sin agregar) en el formulario."""
-        if not hasattr(self, "autocompletado_presentacion_empaque"):
-            return None
+    def _agregar_empaque_presentacion(self, e):
+        """Agrega un empaque a la lista acumulada de la presentación que
+        se está armando (todavía sin confirmar con 'Agregar presentación')."""
         nombre = self.autocompletado_presentacion_empaque.obtener()
         if not nombre:
-            return None
-        id_activo = getattr(self.autocompletado_presentacion_empaque, "obtener_id", lambda: None)()
-        return {"nombre": nombre, "id_activo": id_activo, "cantidad": 1}
+            return
 
-    def _armar_datos_parciales_para_preview(self, empaque: dict | None = None) -> dict:
+        id_activo = getattr(self.autocompletado_presentacion_empaque, "obtener_id", lambda: None)()
+
+        try:
+            cantidad = float(self.txt_presentacion_empaque_cantidad.value or 1) or 1
+        except ValueError:
+            cantidad = 1
+
+        self._empaques_presentacion_actual.append({
+            "nombre": nombre,
+            "id_activo": id_activo,
+            "cantidad": cantidad,
+        })
+
+        self.tabla_empaques_presentacion.reemplazar(self._empaques_presentacion_actual)
+
+        self.autocompletado_presentacion_empaque.limpiar()
+        self.txt_presentacion_empaque_cantidad.value = "1"
+        self.txt_presentacion_empaque_cantidad.update()
+
+        self._actualizar_precio_sugerido()
+
+    def _armar_datos_parciales_para_preview(self, empaques: list[dict] | None = None) -> dict:
         """
         Arma un dict "en progreso" con todo lo que el usuario ya cargó
         en Información/Costos, para pedirle a ProductoService un cálculo
-        de costo/precio sin guardar nada. `empaque`, si se pasa, es el
-        de ESTA presentación puntual (no un total del producto: cada
-        presentación puede llevar un empaque distinto).
+        de costo/precio sin guardar nada. `empaques`, si se pasa, son
+        los de ESTA presentación puntual (no un total del producto: cada
+        presentación puede llevar empaques distintos).
 
         Se asume que estos widgets ya existen porque Presentaciones es
         el paso siguiente a Costos.
@@ -880,7 +922,7 @@ class ProductoWizard(ft.Container):
         return {
             "tipo": "individual",
             "id_receta": getattr(self.autocompletado_receta, "obtener_id", lambda: None)(),
-            "empaques": [empaque] if empaque else [],
+            "empaques": empaques or [],
             # ⚠️ Requiere que ProductoService acepte "costos_indirectos_monto"
             # como override directo del total de costos indirectos (en vez
             # de recalcularlo desde una lista de activos elegidos a mano).
@@ -889,12 +931,12 @@ class ProductoWizard(ft.Container):
             "margen_porcentaje": self.txt_margen.value or 40,
         }
 
-    def _precio_sugerido_actual(self, fraccion: float, empaque: dict | None = None) -> float:
+    def _precio_sugerido_actual(self, fraccion: float, empaques: list[dict] | None = None) -> float:
         """Precio sugerido para una presentación que representa `fraccion`% del producto completo."""
         if not self.calcular_preview:
             return 0.0
         try:
-            datos_parciales = self._armar_datos_parciales_para_preview(empaque)
+            datos_parciales = self._armar_datos_parciales_para_preview(empaques)
             resultado = self.calcular_preview(datos_parciales) or {}
         except Exception:
             return 0.0
@@ -905,7 +947,7 @@ class ProductoWizard(ft.Container):
         """
         Recalcula el precio sugerido mostrado en el campo de solo lectura.
         Se llama al cambiar el tiempo de preparación, el margen, el tipo
-        de presentación, la cantidad de trozos o el empaque elegido.
+        de presentación, la cantidad de trozos o los empaques agregados.
         Con hasattr porque txt_margen (paso Costos) puede disparar este
         callback antes de que el paso Presentaciones exista todavía.
         """
@@ -921,8 +963,7 @@ class ProductoWizard(ft.Container):
         else:
             fraccion = 100.0
 
-        empaque = self._empaque_seleccionado_actual()
-        sugerido = self._precio_sugerido_actual(fraccion, empaque)
+        sugerido = self._precio_sugerido_actual(fraccion, self._empaques_presentacion_actual)
         self.txt_presentacion_precio_sugerido.value = f"{sugerido:.2f}"
         # ✅ Se revisa la página del control en sí, no la del wizard: un
         # control recién creado (p.ej. al construir este paso) puede no
@@ -1790,10 +1831,6 @@ class ProductoWizard(ft.Container):
             if getattr(self, "_es_torta", False) and hasattr(self, "dd_torta_tamano"):
 
                 datos["torta_tamano_cm"] = self.dd_torta_tamano.value
-
-                datos["torta_vende_por_porciones"] = self.sw_torta_por_porciones.value
-
-                datos["torta_cantidad_porciones"] = self.txt_torta_porciones.value
 
         elif self.tipo == "elaborado":
 

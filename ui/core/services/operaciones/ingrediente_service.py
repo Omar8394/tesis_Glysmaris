@@ -182,11 +182,17 @@ class IngredienteService(CRUDService):
             if not registrado:
                 return ServiceResult.error("No se pudo registrar la pérdida.")
 
-            mensaje = (
-                "Se eliminó el lote por completo."
-                if es_perdida_total
-                else f"Se registró la pérdida de {cantidad:.2f} unidades del lote."
-            )
+            if motivo_enum == "error_registro":
+                mensaje = (
+                    "Se eliminó el registro erróneo. Si vuelves a cargar este "
+                    "ingrediente, se registrará como uno nuevo."
+                )
+            else:
+                mensaje = (
+                    "Se eliminó el lote por completo."
+                    if es_perdida_total
+                    else f"Se registró la pérdida de {cantidad:.2f} unidades del lote."
+                )
             return ServiceResult.ok(mensaje=mensaje)
         except Exception as ex:
             return ServiceResult.error(str(ex))
@@ -195,6 +201,50 @@ class IngredienteService(CRUDService):
         try:
             datos = self._repository.buscar(texto)
             return ServiceResult.ok(datos=datos)
+        except Exception as ex:
+            return ServiceResult.error(str(ex))
+
+    # ---------- Descuento/devolución de stock (usado por Producción) ----------
+
+    def verificar_disponibilidad(self, id_ingrediente: int, cantidad_necesaria: float) -> ServiceResult:
+        """Compara el stock total disponible (suma de lotes vigentes) contra
+        la cantidad necesaria. No descuenta nada, solo informa."""
+        try:
+            disponible = self._repository.obtener_stock(id_ingrediente)
+            cantidad_necesaria = float(cantidad_necesaria)
+            return ServiceResult.ok(datos={
+                "disponible": disponible,
+                "necesario": cantidad_necesaria,
+                "faltante": max(0.0, cantidad_necesaria - disponible),
+                "suficiente": disponible >= cantidad_necesaria,
+            })
+        except Exception as ex:
+            return ServiceResult.error(str(ex))
+
+    def descontar_stock(self, id_ingrediente: int, cantidad: float) -> ServiceResult:
+        """Descuenta 'cantidad' en PEPS entre los lotes del ingrediente.
+        datos trae la lista de lotes afectados (necesaria para poder
+        devolver el stock si la orden de producción se cancela)."""
+        try:
+            if cantidad <= 0:
+                return ServiceResult.ok(datos=[])
+            afectados = self._repository.descontar_stock_peps(id_ingrediente, cantidad)
+            if afectados is None:
+                return ServiceResult.error("Stock insuficiente para descontar.")
+            return ServiceResult.ok(datos=afectados)
+        except Exception as ex:
+            return ServiceResult.error(str(ex))
+
+    def devolver_stock(self, id_lote: int, cantidad: float) -> ServiceResult:
+        """Repone 'cantidad' a un lote específico (cancelación de una orden
+        de producción que ya había descontado inventario)."""
+        try:
+            if cantidad <= 0:
+                return ServiceResult.ok()
+            ok = self._repository.devolver_stock_lote(id_lote, cantidad)
+            if not ok:
+                return ServiceResult.error("No se pudo devolver el stock (lote no encontrado).")
+            return ServiceResult.ok()
         except Exception as ex:
             return ServiceResult.error(str(ex))
 

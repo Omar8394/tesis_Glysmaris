@@ -29,6 +29,18 @@ class RecetasForm(ft.Container):
         "cucharadita",
     ]
 
+    # Unidades permitidas para el rendimiento de la receta. No se
+    # incluyen fracciones de taza/cucharadas acá porque el rendimiento
+    # se usa luego para escalar producción (necesita una unidad de masa,
+    # volumen o conteo "limpia", no una medida casera fraccionada).
+    UNIDADES_RENDIMIENTO = [
+        "unidad",
+        "g",
+        "kg",
+        "ml",
+        "L",
+    ]
+
     TITULOS_ORIGEN = {
         "base": "Ingredientes de la Base",
         "relleno": "Ingredientes del Relleno",
@@ -65,6 +77,23 @@ class RecetasForm(ft.Container):
             width=220,
             value="Base",
             options=[ft.dropdown.Option(x) for x in self.TIPOS_RECETA],
+        )
+
+        # ---------------------------------------------------
+        # Rendimiento (cuánto produce esta receta al hacerla completa)
+        # ---------------------------------------------------
+        self.txt_rendimiento_cantidad = ft.TextField(
+            label="Rinde",
+            width=120,
+            value="1",
+            keyboard_type=ft.KeyboardType.NUMBER,
+        )
+
+        self.dd_rendimiento_unidad = ft.Dropdown(
+            label="Unidad de rendimiento",
+            width=200,
+            value="unidad",
+            options=[ft.dropdown.Option(x) for x in self.UNIDADES_RENDIMIENTO],
         )
 
         # ---------------------------------------------------
@@ -160,6 +189,7 @@ class RecetasForm(ft.Container):
                 ft.Row([self.btn_nuevo, self.btn_guardar, self.btn_cancelar]),
                 ft.Divider(),
                 ft.Row([self.txt_nombre, self.dd_tipo]),
+                ft.Row([self.txt_rendimiento_cantidad, self.dd_rendimiento_unidad]),
                 ft.Text("Ingredientes propios", weight=ft.FontWeight.BOLD),
                 ft.Row(
                     [self.dd_ingrediente, self.txt_cantidad, self.dd_unidad, self.btn_agregar],
@@ -375,17 +405,23 @@ class RecetasForm(ft.Container):
             "ingrediente": self.dd_ingrediente.value,
             "cantidad": self.txt_cantidad.value,
             "unidad": self.dd_unidad.value,
+            "rendimiento_cantidad": self.txt_rendimiento_cantidad.value,
+            "rendimiento_unidad": self.dd_rendimiento_unidad.value,
         }
 
     def cargar(self, receta: dict):
         self.txt_nombre.value = receta.get("nombre_receta", "")
         self.dd_tipo.value = receta.get("tipo_receta", "Base")
+        self.txt_rendimiento_cantidad.value = str(receta.get("rendimiento_cantidad", 1))
+        self.dd_rendimiento_unidad.value = receta.get("rendimiento_unidad", "unidad")
         if self.page:
             self.update()
 
     def limpiar(self):
         self.txt_nombre.value = ""
         self.dd_tipo.value = "Base"
+        self.txt_rendimiento_cantidad.value = "1"
+        self.dd_rendimiento_unidad.value = "unidad"
         self.dd_ingrediente.value = None
         self.txt_cantidad.value = ""
         self.dd_unidad.value = "g"

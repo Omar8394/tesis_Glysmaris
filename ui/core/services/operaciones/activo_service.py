@@ -146,6 +146,30 @@ class ActivoService(CRUDService):
             return []
         return self.repo.obtener_por_tipo(tipo)
 
+    # ---------- Descuento/devolución de stock (usado por Producción) ----------
+    # Solo aplica a empaques: son el único tipo de activo que se consume
+    # unidad por unidad al producir. Utensilios/herramientas/mobiliario/
+    # servicios son capital o costo indirecto, no insumo -- no se tocan acá.
+
+    def descontar_stock(self, identificador: Any, cantidad: float) -> ServiceResult:
+        if cantidad <= 0:
+            return ServiceResult.ok()
+        activo = self.obtener(identificador)
+        if not activo:
+            return ServiceResult.error("Recurso no encontrado.")
+        if float(activo.get("stock_actual", 0)) < cantidad:
+            return ServiceResult.error("Stock insuficiente para descontar.")
+        if self.repo.descontar_stock(identificador, cantidad):
+            return ServiceResult.ok()
+        return ServiceResult.error("No se pudo descontar el stock (condición de carrera: revisá el stock actual).")
+
+    def devolver_stock(self, identificador: Any, cantidad: float) -> ServiceResult:
+        if cantidad <= 0:
+            return ServiceResult.ok()
+        if self.repo.incrementar_stock(identificador, cantidad):
+            return ServiceResult.ok()
+        return ServiceResult.error("No se pudo devolver el stock.")
+
     def cambiar_estado(self, identificador: Any, nuevo_estado: str) -> ServiceResult:
         if nuevo_estado not in self.ESTADOS_VALIDOS:
             return ServiceResult.error("Estado no válido.")

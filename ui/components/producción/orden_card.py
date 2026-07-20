@@ -16,6 +16,8 @@ Autor:
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import flet as ft
 
 from ui.core.theme_manager import ThemeManager
@@ -136,8 +138,14 @@ class OrdenCard(ft.Card):
                     ],
                     spacing=4,
                 ),
-                # Progreso (solo si está en proceso)
-                self._crear_barra_progreso() if estado == "en_proceso" else ft.Container(),
+                # Progreso: proxy honesto en base al tiempo transcurrido
+                # desde fecha_inicio contra tiempo_estimado_minutos de la
+                # orden. No es un avance físico reportado (eso requeriría
+                # que alguien lo cargue a mano), pero es un dato real
+                # derivado de columnas que sí existen -- no un valor
+                # inventado. Si falta fecha_inicio o tiempo_estimado, no
+                # se muestra nada en vez de mostrar un número falso.
+                self._crear_barra_progreso() if estado == "en_proceso" and self._calcular_progreso() is not None else ft.Container(),
                 # Botones de acción según estado
                 self._crear_botones_accion(),
             ],
@@ -153,14 +161,36 @@ class OrdenCard(ft.Card):
         # Por ahora, si viene en los datos, la usamos; si no, 0.
         return self.orden.get("total_cantidad", 0)
 
+    def _calcular_progreso(self) -> int | None:
+        """
+        Progreso estimado = tiempo transcurrido desde fecha_inicio /
+        tiempo_estimado_minutos de la orden, acotado a 0-100. Devuelve
+        None si falta alguno de los dos datos (orden vieja sin
+        fecha_inicio registrada, o sin tiempo estimado) -- en ese caso
+        no se muestra la barra, no se inventa un número.
+        """
+        fecha_inicio = self.orden.get("fecha_inicio")
+        tiempo_estimado = self.orden.get("tiempo_estimado_minutos")
+
+        if not fecha_inicio or not tiempo_estimado:
+            return None
+
+        try:
+            tiempo_estimado = float(tiempo_estimado)
+            if tiempo_estimado <= 0:
+                return None
+            transcurrido_minutos = (datetime.now() - fecha_inicio).total_seconds() / 60
+            return int(min(100, max(0, (transcurrido_minutos / tiempo_estimado) * 100)))
+        except (TypeError, ValueError):
+            return None
+
     def _crear_barra_progreso(self) -> ft.Container:
-        """Crea una barra de progreso simple para órdenes en proceso."""
-        # Calculamos un progreso basado en cantidades (placeholder)
-        progreso = self.orden.get("progreso", 50)  # Simulación
+        """Barra de progreso estimado para órdenes en proceso."""
+        progreso = self._calcular_progreso() or 0
         return ft.Container(
             content=ft.Row(
                 [
-                    ft.Text(f"{progreso}%", size=12, color=ft.colors.GREY),
+                    ft.Text(f"{progreso}% (estimado)", size=12, color=ft.colors.GREY),
                     ft.Container(
                         width=150,
                         height=6,

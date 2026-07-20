@@ -23,7 +23,7 @@ import bcrypt
 from ui.core.database.factory import DatabaseFactory
 from ui.core.database.schema.seguridad.schema import SCHEMA_SEGURIDAD
 from ui.core.database.schema.operaciones.schema import SCHEMA_OPERACIONES
-
+from ui.core.database.ensure_database import crear_bases_de_datos_si_no_existen
 
 # ============================================================
 # Helpers para migraciones seguras de columnas/llaves foráneas
@@ -131,8 +131,10 @@ def migrar_todas_las_tablas() -> None:
     Ejecuta todos los scripts de creación de tablas en ambas bases de datos.
 
     Utiliza DatabaseFactory para obtener las conexiones y ejecuta
-    las sentencias SQL definidas en los schemas correspondientes.
-    """
+    las sentencias SQL definidas en los schemas correspondientes."""
+
+    crear_bases_de_datos_si_no_existen()
+    
     # ============================================================
     # 1. BASE DE DATOS DE SEGURIDAD
     # ============================================================

@@ -80,6 +80,7 @@ class ServiceFactory:
                 ingrediente_service=cls.get_ingrediente_service(),
                 activo_service=cls.get_activo_service(),
                 producto_service=cls.get_producto_service(),
+                recetas_service=cls.get_recetas_service(),
             )
 
             cls._instances["produccion"] = service

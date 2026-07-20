@@ -122,27 +122,38 @@ class ProduccionRepository(CRUDRepository):
 
     def obtener_orden(self, id_orden: int) -> Optional[Dict]:
         cursor = self._cursor()
-        cursor.execute("SELECT * FROM PRODUCCION_ORDENES WHERE id_orden = %s", (id_orden,))
+        cursor.execute("""
+            SELECT o.*, COALESCE(SUM(d.cantidad_planificada), 0) AS total_cantidad
+            FROM PRODUCCION_ORDENES o
+            LEFT JOIN PRODUCCION_DETALLE d ON d.id_orden = o.id_orden
+            WHERE o.id_orden = %s
+            GROUP BY o.id_orden
+        """, (id_orden,))
         row = cursor.fetchone()
         return dict(row) if row else None
 
     def listar_ordenes(self, filtros: Optional[Dict] = None) -> List[Dict]:
-        query = "SELECT * FROM PRODUCCION_ORDENES WHERE 1=1"
+        query = """
+            SELECT o.*, COALESCE(SUM(d.cantidad_planificada), 0) AS total_cantidad
+            FROM PRODUCCION_ORDENES o
+            LEFT JOIN PRODUCCION_DETALLE d ON d.id_orden = o.id_orden
+            WHERE 1=1
+        """
         params = []
 
         if filtros:
             if "estado" in filtros and filtros["estado"] != "Todos":
-                query += " AND estado = %s"
+                query += " AND o.estado = %s"
                 params.append(filtros["estado"])
             if "prioridad" in filtros and filtros["prioridad"] != "todas":
-                query += " AND prioridad = %s"
+                query += " AND o.prioridad = %s"
                 params.append(filtros["prioridad"])
             if "buscar" in filtros:
-                query += " AND (numero_orden LIKE %s OR responsable LIKE %s)"
+                query += " AND (o.numero_orden LIKE %s OR o.responsable LIKE %s)"
                 term = f"%{filtros['buscar']}%"
                 params.extend([term, term])
 
-        query += " ORDER BY fecha_creacion DESC"
+        query += " GROUP BY o.id_orden ORDER BY o.fecha_creacion DESC"
 
         cursor = self._cursor()
         cursor.execute(query, params)

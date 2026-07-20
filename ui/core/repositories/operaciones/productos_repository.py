@@ -37,6 +37,8 @@ class ProductoRepository(CRUDRepository):
         p.receta_id,
         r.nombre_receta,
         p.descripcion_producto AS descripcion,
+        p.peso,
+        p.unidad_peso,
         p.costo_receta,
         p.mano_obra,
         p.tiempo_preparacion_minutos,
@@ -221,7 +223,7 @@ class ProductoRepository(CRUDRepository):
         params: List[Any] = []
         if filtro:
             condiciones.append("p.nombre_producto LIKE %s")
-            params.append(f"%{filtro}%")
+            params.append(f"{filtro}%")
         if solo_activos:
             condiciones.append("p.activo = TRUE")
         if condiciones:

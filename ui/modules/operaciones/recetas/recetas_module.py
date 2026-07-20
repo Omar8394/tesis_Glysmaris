@@ -419,9 +419,15 @@ class RecetasModule:
     # ============================================================
 
     def _recalcular_costos(self):
-        subtotal = self.service.calcular_subtotal(self._ingredientes)
-        sugerido = self.service.calcular_precio_sugerido(self._ingredientes)
-        self.form.actualizar_costos(subtotal, sugerido)
+        try:
+            subtotal = self.service.calcular_subtotal(self._ingredientes)
+        except ValueError as e:
+            MensajeSistema.advertencia(self.page, f"No se pudo calcular el costo: {e}")
+            subtotal = 0
+        # TODO: cuando actualicemos recetas_form.py, sacar el segundo
+        # parámetro (era "precio sugerido", que ya no se usa) y dejar
+        # actualizar_costos con un solo valor: el costo de ingredientes.
+        self.form.actualizar_costos(subtotal, subtotal)
 
     def _refrescar_ingredientes(self):
         self.form.mostrar_ingredientes(self._ingredientes)
@@ -468,6 +474,8 @@ class RecetasModule:
             "tipo": datos_form["tipo"],
             "descripcion": "",
             "ingredientes": self._ingredientes,
+            "rendimiento_cantidad": datos_form["rendimiento_cantidad"],
+            "rendimiento_unidad": datos_form["rendimiento_unidad"],
         }
 
         resultado = self.service.guardar(datos, self._seleccionado)

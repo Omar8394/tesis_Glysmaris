@@ -99,7 +99,7 @@ class ActivoRepository(CRUDRepository):
         cursor.execute("""
             SELECT * FROM ACTIVOS
             WHERE nombre LIKE %s OR tipo LIKE %s OR descripcion LIKE %s
-        """, (f"%{texto}%", f"%{texto}%", f"%{texto}%"))
+        """, (f"{texto}%", f"%{texto}%", f"%{texto}%"))
         return [dict(row) for row in cursor.fetchall()]
 
     def obtener_por_tipo(self, tipo: str) -> List[Dict]:
@@ -109,3 +109,26 @@ class ActivoRepository(CRUDRepository):
             (tipo,)
         )
         return [dict(row) for row in cursor.fetchall()]
+
+    def descontar_stock(self, id_activo: int, cantidad: float) -> bool:
+        """Descuenta stock_actual de forma atómica: la condición
+        stock_actual >= %s en el WHERE evita dejarlo en negativo si dos
+        producciones lo descuentan casi al mismo tiempo."""
+        cursor = self._cursor()
+        cursor.execute(
+            "UPDATE ACTIVOS SET stock_actual = stock_actual - %s WHERE id_activo = %s AND stock_actual >= %s",
+            (cantidad, id_activo, cantidad),
+        )
+        self._commit()
+        return cursor.rowcount > 0
+
+    def incrementar_stock(self, id_activo: int, cantidad: float) -> bool:
+        """Repone stock_actual (cancelación de una orden de producción que
+        ya había descontado empaques)."""
+        cursor = self._cursor()
+        cursor.execute(
+            "UPDATE ACTIVOS SET stock_actual = stock_actual + %s WHERE id_activo = %s",
+            (cantidad, id_activo),
+        )
+        self._commit()
+        return cursor.rowcount > 0
