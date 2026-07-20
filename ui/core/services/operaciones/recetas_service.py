@@ -410,13 +410,36 @@ class RecetasService(CRUDService):
 
     def _parsear_contenido_unidad(self, contenido: str) -> Optional[tuple]:
         """
-        Parsea el campo 'contenido_unidad' del ingrediente (ej. '500 g',
-        '1kg', '750ml') en (cantidad, unidad). Devuelve None si el campo
-        está vacío o no tiene un formato reconocible.
+        Parsea el campo 'contenido_unidad' del ingrediente. Acepta dos
+        formatos:
+          - Número puro, ej. '100', '500', '1.5' -> se asume que está
+            expresado en la misma 'unidad_medida' que ya tiene el
+            ingrediente (que es como realmente se carga: el usuario
+            escribe el número acá y elige la unidad en el combobox
+            'Unidad de medida', no vuelve a escribirla en este campo).
+          - Número + unidad en el mismo texto, ej. '500 g', '1kg', '750ml'
+            -> por si en algún ingrediente sí se cargó así.
+
+        Devuelve (cantidad, unidad_o_None). unidad es None cuando el
+        campo es un número puro; en ese caso quien llama debe asumir la
+        unidad_medida del ingrediente. Devuelve None si el campo está
+        vacío o no tiene un formato reconocible.
         """
         if not contenido:
             return None
-        match = re.match(r"^\s*([\d]+(?:[.,][\d]+)?)\s*([a-zA-Zñáéíóú]+)\s*$", contenido.strip())
+        texto = str(contenido).strip()
+
+        # Número puro (sin unidad en el texto)
+        match_numero = re.match(r"^([\d]+(?:[.,][\d]+)?)$", texto)
+        if match_numero:
+            try:
+                cantidad = float(match_numero.group(1).replace(",", "."))
+            except ValueError:
+                return None
+            return (cantidad, None) if cantidad > 0 else None
+
+        # Número + unidad en el mismo texto
+        match = re.match(r"^\s*([\d]+(?:[.,][\d]+)?)\s*([a-zA-Zñáéíóú]+)\s*$", texto)
         if not match:
             return None
         cantidad_str, unidad_str = match.groups()
@@ -472,15 +495,38 @@ class RecetasService(CRUDService):
 
     def calcular_subtotal(self, ingredientes: List[Dict]) -> float:
         """
-        Calcula el subtotal de ingredientes convirtiendo cantidades a la unidad
-        en que está valorado cada ingrediente (unidad_medida) antes de
-        multiplicar por su costo_unitario. Si el ingrediente se compra por
-        'unidad' pero la receta lo usa por peso/volumen, usa el campo
-        contenido_unidad para calcular la fracción de esa unidad que se usó.
+        costo_unitario SIEMPRE representa el precio de UN paquete/frasco/
+        pieza completa tal como se compró (lo que el usuario escribió en
+        el campo 'Costo ($)' del formulario de ingredientes), nunca el
+        precio "por gramo" o "por ml".
 
-        Puede lanzar ValueError si algún ingrediente trae una unidad que no
-        se puede resolver de ninguna de las dos formas — esto es intencional:
-        es preferible frenar con un mensaje claro a calcular un costo erróneo.
+        Cuando el ingrediente tiene 'Contenido por unidad' (ej. '500 g',
+        '100 ml') definido, ese campo indica cuánto producto real trae
+        CADA paquete comprado. El costo de usar una cantidad de la receta
+        es entonces:
+
+            costo_item = costo_unitario * (cantidad_usada / contenido_del_paquete)
+
+        Esto debe aplicarse SIEMPRE que 'Contenido por unidad' esté
+        definido, sin importar si la unidad de la receta coincide o no
+        con la 'unidad_medida' del ingrediente.
+
+        ❌ Bug anterior: la conversión de unidades solo consultaba
+        'Contenido por unidad' cuando la conversión directa entre
+        unidad_receta y unidad_medida FALLABA (ej. kg -> g). Pero si
+        ambas unidades eran la misma magnitud, o directamente la misma
+        unidad (ml con ml, g con g), la conversión directa "funcionaba"
+        (devolvía la cantidad tal cual, sin fraccionar), y el costo
+        terminaba siendo costo_unitario * cantidad_en_gramos_o_ml en vez
+        de costo_unitario * fracción_del_paquete. Ejemplo real: esencia
+        de vainilla, frasco de 100 ml a $5, receta pide 100 ml -> como
+        'ml' = 'ml', el sistema calculaba $5 * 100 = $500 en vez de
+        $5 * (100/100) = $5.
+
+        Si el ingrediente NO tiene 'Contenido por unidad' definido, se
+        asume que costo_unitario ya es el precio directo por unidad_medida
+        (ej. $8 por kg), y simplemente se convierte la cantidad de la
+        receta a esa unidad_medida.
         """
         todos = self.repo_ingredientes.listar()
         cache = {i["id_ingrediente"]: i for i in todos}
@@ -491,21 +537,52 @@ class RecetasService(CRUDService):
             if not bd:
                 continue
 
+            nombre = bd.get("nombre_ingrediente", f"id {item['id']}")
             costo_unitario = float(bd.get("costo_unitario", 0))
-            unidad_base = bd.get("unidad_medida", "")
-            cantidad = float(item.get("cantidad", 0))
+            unidad_medida = bd.get("unidad_medida", "")
+            cantidad_receta = float(item.get("cantidad", 0))
             unidad_receta = item.get("unidad", "")
+            contenido_unidad = bd.get("contenido_unidad", "")
 
-            if self._normalizar_unidad(unidad_receta) != self._normalizar_unidad(unidad_base):
+            if contenido_unidad:
+                parsed = self._parsear_contenido_unidad(contenido_unidad)
+                if not parsed:
+                    raise ValueError(
+                        f"El campo 'Contenido por unidad' del ingrediente '{nombre}' tiene un "
+                        f"formato inválido. Usa un número (ej. '500', asumiendo la unidad de "
+                        f"medida del ingrediente) o número + unidad (ej. '500 g', '100 ml')."
+                    )
+                contenido_cantidad, contenido_unidad_str = parsed
+                # Si el campo fue un número puro (ej. '100'), no trae unidad
+                # propia -> se asume la unidad_medida del ingrediente (así es
+                # como realmente se carga: el número va en este campo y la
+                # unidad se elige en el combobox 'Unidad de medida').
+                unidad_objetivo = contenido_unidad_str or unidad_medida
                 try:
-                    cantidad = self._convertir_a_unidad_base(cantidad, unidad_receta, unidad_base, bd)
+                    cantidad_en_contenido = self.convertir_unidad(
+                        cantidad_receta, unidad_receta, unidad_objetivo
+                    )
                 except ValueError as e:
-                    nombre = bd.get("nombre_ingrediente", f"id {item['id']}")
+                    raise ValueError(
+                        f"{nombre}: la receta usa '{unidad_receta}' pero el 'Contenido por "
+                        f"unidad' de este ingrediente está en '{unidad_objetivo}', de otra "
+                        f"magnitud. Corregí la unidad en la receta o el campo del ingrediente."
+                    ) from e
+
+                fraccion_del_paquete = cantidad_en_contenido / contenido_cantidad
+                subtotal += costo_unitario * fraccion_del_paquete
+            else:
+                # Sin 'Contenido por unidad': costo_unitario ya es el precio
+                # directo por unidad_medida (ej. $8/kg).
+                try:
+                    cantidad_en_unidad_medida = self.convertir_unidad(
+                        cantidad_receta, unidad_receta, unidad_medida
+                    )
+                except ValueError as e:
                     raise ValueError(f"{nombre}: {e}") from e
+                subtotal += costo_unitario * cantidad_en_unidad_medida
 
-            subtotal += cantidad * costo_unitario
-
-        return round(subtotal, 2)
+        return subtotal
 
     def recalcular_costo(self, identificador: int) -> ServiceResult:
         """

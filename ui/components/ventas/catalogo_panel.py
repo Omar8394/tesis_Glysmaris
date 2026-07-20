@@ -31,13 +31,13 @@ class CatalogoPanel(ft.Column):
             on_change=self.filtrar
         )
 
-        # Grid de tarjetas
+        # Grid de tarjetas estilizado
         self.grid = ft.GridView(
             expand=True,
-            max_extent=200,
+            max_extent=240,               # Ampliado ligeramente para acomodar botones cómodamente
             spacing=AppSpacing.CONTROL_SPACING,
             run_spacing=AppSpacing.CONTROL_SPACING,
-            child_aspect_ratio=1.2,
+            child_aspect_ratio=1.35,      # Proporción adecuada para evitar truncar textos
         )
 
         self.controls = [
@@ -73,4 +73,5 @@ class CatalogoPanel(ft.Column):
                 on_agregar=self.on_agregar
             )
             self.grid.controls.append(tarjeta)
-        self.update()
+        if self.page:
+            self.update()  

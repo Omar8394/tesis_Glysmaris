@@ -422,33 +422,94 @@ SCHEMA_OPERACIONES = [
     # verifica en INFORMATION_SCHEMA si cada columna/llave ya existe
     # antes de tocarla. Ver _aplicar_migraciones_manuales().
 
-    # ============================================================
-    # 9. VENTAS
+   # ============================================================
+    # 9. VENTAS (reescrita)
     # ============================================================
     """
     CREATE TABLE IF NOT EXISTS VENTAS (
         id_venta INT AUTO_INCREMENT PRIMARY KEY,
         fecha_venta DATETIME DEFAULT CURRENT_TIMESTAMP,
-        cliente VARCHAR(100),
-        cedula VARCHAR(20),
-        metodo_pago ENUM('efectivo', 'pagomovil', 'credito') NOT NULL,
-        referencia VARCHAR(50),
-        total DECIMAL(10,2) NOT NULL
+        cliente_nombre VARCHAR(100),
+        cliente_cedula VARCHAR(20),
+        cliente_telefono VARCHAR(20),
+        subtotal DECIMAL(10,2) NOT NULL DEFAULT 0,
+        descuento DECIMAL(10,2) NOT NULL DEFAULT 0,
+        total DECIMAL(10,2) NOT NULL,
+        estado ENUM('completada','anulada') NOT NULL DEFAULT 'completada',
+        observaciones TEXT,
+        usuario_registro VARCHAR(100),
+        INDEX idx_fecha (fecha_venta),
+        INDEX idx_cliente (cliente_cedula)
     )
     """,
+
     # ============================================================
-    # 10. DETALLE_VENTA
+    # 9B. VENTA_PAGOS (pagos mixtos: efectivo + pago móvil, etc.)
+    # ============================================================
+    """
+    CREATE TABLE IF NOT EXISTS VENTA_PAGOS (
+        id_pago INT AUTO_INCREMENT PRIMARY KEY,
+        id_venta INT NOT NULL,
+        metodo_pago ENUM('efectivo','debito','credito','transferencia','pago_movil') NOT NULL,
+        monto DECIMAL(10,2) NOT NULL,
+        referencia VARCHAR(50),
+        FOREIGN KEY (id_venta) REFERENCES VENTAS(id_venta) ON DELETE CASCADE,
+        INDEX idx_venta (id_venta)
+    )
+    """,
+
+    # ============================================================
+    # 10. DETALLE_VENTA (reescrita, con snapshot para estadísticas)
     # ============================================================
     """
     CREATE TABLE IF NOT EXISTS DETALLE_VENTA (
         id_detalle_venta INT AUTO_INCREMENT PRIMARY KEY,
         id_venta INT NOT NULL,
-        id_detalle_produccion INT NOT NULL,
+        id_producto INT NOT NULL,
+        nombre_producto VARCHAR(150) NOT NULL,
+        categoria VARCHAR(50),
+        presentacion VARCHAR(100),
         cantidad INT NOT NULL,
         precio_unitario DECIMAL(10,2) NOT NULL,
         subtotal DECIMAL(10,2) NOT NULL,
         FOREIGN KEY (id_venta) REFERENCES VENTAS(id_venta) ON DELETE CASCADE,
-        FOREIGN KEY (id_detalle_produccion) REFERENCES DETALLE_PRODUCCION(id_detalle) ON DELETE RESTRICT
+        FOREIGN KEY (id_producto) REFERENCES PRODUCTOS(id_producto) ON DELETE RESTRICT,
+        INDEX idx_venta (id_venta),
+        INDEX idx_producto (id_producto),
+        INDEX idx_nombre_producto (nombre_producto)
+    )
+    """,
+
+    # ============================================================
+    # 10B. VENTA_CONSUMO_PRODUCCION (de qué lote(s) salió cada línea, estilo PEPS)
+    # ============================================================
+    """
+    CREATE TABLE IF NOT EXISTS VENTA_CONSUMO_PRODUCCION (
+        id_consumo INT AUTO_INCREMENT PRIMARY KEY,
+        id_detalle_venta INT NOT NULL,
+        id_detalle_produccion INT NOT NULL,
+        cantidad INT NOT NULL,
+        FOREIGN KEY (id_detalle_venta) REFERENCES DETALLE_VENTA(id_detalle_venta) ON DELETE CASCADE,
+        FOREIGN KEY (id_detalle_produccion) REFERENCES PRODUCCION_DETALLE(id_detalle) ON DELETE RESTRICT,
+        INDEX idx_detalle_venta (id_detalle_venta)
+    )
+    """,
+
+    # ============================================================
+    # 10C. DETALLE_VENTA_AGREGADOS (toppers/velas personalizadas añadidos en la venta)
+    # ============================================================
+    """
+    CREATE TABLE IF NOT EXISTS DETALLE_VENTA_AGREGADOS (
+        id_detalle_agregado INT AUTO_INCREMENT PRIMARY KEY,
+        id_detalle_venta INT NOT NULL,
+        id_activo INT NOT NULL,
+        nombre_activo VARCHAR(100) NOT NULL,
+        cantidad DECIMAL(10,2) NOT NULL DEFAULT 1,
+        costo_unitario DECIMAL(10,2) NOT NULL,
+        subtotal DECIMAL(10,2) NOT NULL,
+        FOREIGN KEY (id_detalle_venta) REFERENCES DETALLE_VENTA(id_detalle_venta) ON DELETE CASCADE,
+        FOREIGN KEY (id_activo) REFERENCES ACTIVOS(id_activo) ON DELETE RESTRICT,
+        INDEX idx_detalle_venta (id_detalle_venta)
     )
     """,
     # ============================================================

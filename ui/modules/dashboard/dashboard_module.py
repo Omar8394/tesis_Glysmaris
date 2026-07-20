@@ -32,6 +32,7 @@ from ui.modules.operaciones.productos.productos import productos_view
 from ui.modules.operaciones.activos.activos import activos_view
 from ui.modules.operaciones.produccion.produccion import produccion_view
 from ui.modules.operaciones.activos.mi_negocio import mi_negocio_view
+from ui.modules.operaciones.ventas.ventas import ventas_view
 
 
 class DashboardModule:
@@ -200,12 +201,11 @@ class DashboardModule:
         self.content_area.update()
 
     def _ir_ventas(self, e=None) -> None:
-        from ui.components.tarjetas import TarjetaInformacion
-        self.content_area.content = TarjetaInformacion(
-            mensaje="Módulo de Ventas en construcción.",
-            titulo="Ventas",
-        )
+        layout, module = ventas_view(self.page, self.content_area)
+        self.content_area.content = layout
         self.content_area.update()
+        if hasattr(module, 'cargar') and callable(module.cargar):
+            module.cargar()
 
     def _logout(self, e=None) -> None:
         """Cierra sesión y vuelve al login."""

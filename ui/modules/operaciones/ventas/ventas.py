@@ -1,9 +1,15 @@
+# ui/modules/operaciones/ventas/ventas.py
+
+from __future__ import annotations
+
 import flet as ft
+
 from ui.components.tarjetas import TarjetaFormulario
 from ui.core.spacing import AppSpacing
 from ui.components.ventas.catalogo_panel import CatalogoPanel
 from ui.components.ventas.carrito_panel import CarritoPanel
 from ui.components.ventas.panel_pago import PanelPago
+
 
 class VentasView(ft.Row):
     def __init__(
@@ -18,12 +24,14 @@ class VentasView(ft.Row):
         activos_disponibles
     ):
         super().__init__(expand=True, spacing=0)
+
         self.on_agregar_producto = on_agregar_producto
         self.on_cambiar_cantidad = on_cambiar_cantidad
         self.on_eliminar_producto = on_eliminar_producto
         self.on_abrir_agregados = on_abrir_agregados
         self.on_continuar_cobro = on_continuar_cobro
         self.on_finalizar_venta = on_finalizar_venta
+
         self.productos_disponibles = productos_disponibles
         self.activos_disponibles = activos_disponibles
 
@@ -60,6 +68,14 @@ class VentasView(ft.Row):
 
         self.controls = [izquierda, derecha]
 
+    # ------------------------------------------------------------
+    # Métodos de actualización
+    # ------------------------------------------------------------
+    def actualizar_catalogo(self, productos):
+        """Actualiza el catálogo con nuevos productos."""
+        self.catalogo.actualizar_productos(productos)
+        self.update()
+
     def actualizar_carrito(self, carrito):
         """Actualiza el carrito con la nueva lista de ítems."""
         self.carrito.actualizar_carrito(carrito)
@@ -79,3 +95,21 @@ class VentasView(ft.Row):
         """Vuelve a mostrar el carrito (al cancelar pago)."""
         self.controls[1].content = self.carrito
         self.update()
+
+    def mostrar_panel_agregados(self, index):
+        """Expande la sección de agregados para la fila del carrito en el índice dado."""
+        # Delegamos al carrito para que expanda la fila correspondiente
+        self.carrito.mostrar_agregados(index)
+        self.update()
+
+
+# ------------------------------------------------------------
+# Función de entrada para el dashboard
+# ------------------------------------------------------------
+def ventas_view(page, content_area):
+    """Crea una instancia del módulo, construye el layout y retorna ambos."""
+    from ui.modules.operaciones.ventas.ventas_module import VentasModule
+
+    module = VentasModule(page, content_area)
+    layout = module.construir()
+    return layout, module
