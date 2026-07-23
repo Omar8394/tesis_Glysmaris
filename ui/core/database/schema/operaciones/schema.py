@@ -32,7 +32,14 @@ SCHEMA_OPERACIONES = [
         perecedero BOOLEAN DEFAULT FALSE,
         refrigerado BOOLEAN DEFAULT FALSE,
         descripcion TEXT,
-        contenido_unidad VARCHAR(50)
+        -- ✅ Antes era texto libre ("1kg / 200ml") y nunca se usaba en los
+        -- cálculos de stock. Ahora es numérico: cuánto trae CADA artículo,
+        -- expresado en la misma unidad_medida de arriba (ej. si
+        -- unidad_medida='g' y contenido_unidad=500, cada artículo trae
+        -- 500g). El service lo multiplica por la cantidad de artículos al
+        -- crear un lote, para que stock_actual en LOTES_INVENTARIO quede
+        -- siempre en unidad base (lo que ya esperan Producción y recetas).
+        contenido_unidad DECIMAL(10,4) NOT NULL DEFAULT 1
     )
     """,
     # ============================================================

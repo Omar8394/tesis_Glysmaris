@@ -76,7 +76,21 @@ class IngredienteService(CRUDService):
             valido, msg = self.validar(datos)
             if not valido:
                 return ServiceResult.error(msg)
-            
+
+            # ✅ "stock" llega como CANTIDAD DE ARTÍCULOS (ej. 1 bolsa) y
+            # "contenido_unidad" como cuánto trae cada uno, en la MISMA
+            # unidad_medida del ingrediente (ej. 500 -> 500g por bolsa).
+            # Todo el resto del sistema (Producción, recetas, PEPS) trabaja
+            # directo contra stock_actual asumiendo que ya está en unidad
+            # base, así que la conversión tiene que pasar acá, una sola vez,
+            # antes de que el dato toque la base de datos.
+            datos = dict(datos)
+            contenido_unidad = float(datos.get("contenido_unidad") or 1)
+            if contenido_unidad <= 0:
+                contenido_unidad = 1
+            datos["contenido_unidad"] = contenido_unidad
+            datos["stock"] = float(datos.get("stock", 0)) * contenido_unidad
+
             # Buscamos si el ingrediente base ya existe en el catálogo maestro
             # (Usando el método que ya tienes programado en tu capa de datos)
             resultado_existente = self.obtener_por_nombre(datos["nombre"])
@@ -131,7 +145,14 @@ class IngredienteService(CRUDService):
     def actualizar_lote(self, id_lote: int, datos: Dict[str, Any]) -> ServiceResult:
         """✅ Reemplaza al viejo 'actualizar()' para el flujo de edición real
         de la UI: valida igual que al crear (stock/costo/fechas incluidos)
-        y actualiza tanto el ingrediente maestro como el lote puntual."""
+        y actualiza tanto el ingrediente maestro como el lote puntual.
+
+        ⚠️ A diferencia de crear(), acá NO se multiplica "stock" por
+        "contenido_unidad". Un lote existente ya puede estar parcialmente
+        consumido (ej. quedan 250g de una bolsa de 500g), así que pensar en
+        "cantidad de artículos" deja de tener sentido; datos["stock"] en
+        edición representa directamente la cantidad real restante, ya en
+        unidad base, tal como la muestra/corrige el formulario."""
         valido, msg = self.validar(datos)
         if not valido:
             return ServiceResult.error(msg)
@@ -255,6 +276,13 @@ class IngredienteService(CRUDService):
             return False, "El stock no puede ser negativo."
         if datos.get("costo", 0) < 0:
             return False, "El costo no puede ser negativo."
+        # ✅ contenido_unidad es el multiplicador (cuánto trae cada artículo,
+        # en la unidad_medida elegida) que convierte "cantidad de artículos"
+        # en stock real. Si viene, tiene que ser positivo; si no viene, se
+        # asume 1 (el ingrediente se carga directo en unidad base).
+        contenido_unidad = datos.get("contenido_unidad")
+        if contenido_unidad not in (None, "") and float(contenido_unidad) <= 0:
+            return False, "El contenido por unidad debe ser mayor a 0."
         # ✅ Antes no se validaba la fecha en absoluto, lo que permitía
         # guardar ingredientes sin fecha de caducidad ni de ingreso.
         if not datos.get("fecha_ingreso"):

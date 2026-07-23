@@ -35,6 +35,12 @@ class IngredienteFormulario(ft.UserControl):
         # ✅ El formulario sigue sin conocer el service: recibe un callback
         # ya conectado desde IngredienteModule para pedir sugerencias.
         self.buscar_nombres = buscar_nombres
+        # ✅ El campo "Stock" significa cosas distintas según el modo:
+        # - Crear: cantidad de ARTÍCULOS que estás ingresando (se multiplica
+        #   por "Contenido por unidad" en el service).
+        # - Editar: cantidad REAL restante, ya en la unidad base del
+        #   ingrediente (no se vuelve a multiplicar).
+        self._es_edicion = bool(self.datos_iniciales)
         self._crear_campos()
 
     def _crear_campos(self):
@@ -48,9 +54,10 @@ class IngredienteFormulario(ft.UserControl):
         if datos.get("nombre_ingrediente"):
             self.nombre.establecer(datos.get("nombre_ingrediente"))
         self.stock = CampoTexto(
-            etiqueta="Stock",
+            etiqueta="Stock actual" if self._es_edicion else "Cantidad de artículos",
             width=170,
             keyboard_type=ft.KeyboardType.NUMBER,
+            hint="Ej: si compraste 3 bolsas, poné 3" if not self._es_edicion else None,
             value=str(datos.get("stock_actual", "")),
         )
         self.unidad = Selector(
@@ -65,11 +72,16 @@ class IngredienteFormulario(ft.UserControl):
             keyboard_type=ft.KeyboardType.NUMBER,
             value=str(datos.get("costo_unitario", "")),
         )
+        # ✅ Antes era texto libre ("1kg / 200ml") y nunca se usaba para
+        # calcular nada -- por eso el stock de ingredientes en g/ml quedaba
+        # mal. Ahora es numérico, EN LA MISMA "Unidad de medida" elegida
+        # arriba (ej. si unidad = g y cada artículo trae 500g, acá va 500).
         self.contenido = CampoTexto(
-            etiqueta="Contenido por unidad",
-            width=170,
-            hint="Ej: 1kg / 200ml",
-            value=datos.get("contenido_unidad", ""),
+            etiqueta="Contenido por unidad (en la unidad de medida)",
+            width=250,
+            keyboard_type=ft.KeyboardType.NUMBER,
+            hint="Ej: 500 (si cada artículo trae 500g)",
+            value=str(datos.get("contenido_unidad", "") or ""),
         )
         self.categoria = Selector(
             etiqueta="Categoría",
@@ -155,7 +167,7 @@ class IngredienteFormulario(ft.UserControl):
             "stock": float(self.stock.value) if self.stock.value else 0,
             "unidad": self.unidad.value,
             "costo": float(self.costo.value) if self.costo.value else 0,
-            "contenido_unidad": self.contenido.value,
+            "contenido_unidad": float(self.contenido.value) if self.contenido.value else 1,
             "categoria": self.categoria.value,
             "fecha_ingreso": self.fecha_ingreso.obtener() or None,
             "caducidad": self.fecha_caducidad.obtener() or None,
@@ -169,11 +181,15 @@ class IngredienteFormulario(ft.UserControl):
         self.on_cancelar()
 
     def establecer_datos(self, datos: dict):
+        # ✅ Si se reutiliza esta misma instancia para editar un lote,
+        # "Stock" pasa a significar la cantidad real restante en unidad
+        # base (no cantidad de artículos) -- ver comentario en __init__.
+        self._es_edicion = True
         self.nombre.establecer(datos.get("nombre_ingrediente", ""))
         self.stock.value = str(datos.get("stock_actual", ""))
         self.unidad.value = datos.get("unidad_medida")
         self.costo.value = str(datos.get("costo_unitario", ""))
-        self.contenido.value = datos.get("contenido_unidad", "")
+        self.contenido.value = str(datos.get("contenido_unidad", "") or "")
         self.categoria.value = datos.get("categoria")
         self.fecha_ingreso.establecer(datos.get("fecha_ingreso"))
         self.fecha_caducidad.establecer(datos.get("fecha_caducidad"))
