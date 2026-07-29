@@ -377,16 +377,24 @@ class ProduccionWizard(ft.Container):
                 self._mostrar_error("El producto ya está en la lista.")
                 return
 
+        try:
+            cantidad = float(self.cantidad_input.value or 1)
+        except ValueError:
+            cantidad = 1
+        if cantidad <= 0:
+            cantidad = 1
+
         self.productos_seleccionados.append({
             "id_producto": producto["id_producto"],
             "nombre": producto["nombre"],
-            "cantidad": 1,
+            "cantidad": cantidad,
             "id_presentacion": None,
             "precio": producto.get("precio_venta", 0),
         })
         self._refrescar_lista_agregados()
         self.resultados_busqueda.visible = False
         self.buscador_productos.limpiar()
+        self.cantidad_input.value = "1"   # reset para el siguiente producto
         if self.page:
             self.update()
 

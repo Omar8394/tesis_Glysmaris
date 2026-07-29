@@ -33,6 +33,7 @@ from ui.modules.operaciones.activos.activos import activos_view
 from ui.modules.operaciones.produccion.produccion import produccion_view
 from ui.modules.operaciones.activos.mi_negocio import mi_negocio_view
 from ui.modules.operaciones.ventas.ventas import ventas_view
+from ui.modules.operaciones.estadisticas.estadisticas import estadisticas_view
 
 
 class DashboardModule:
@@ -95,6 +96,7 @@ class DashboardModule:
             ("Mi Negocio", ft.icons.STORE_OUTLINED, self._ir_mi_negocio),
             ("Producción", AppIcons.FATORY, self._ir_produccion),
             ("Ventas", AppIcons.SALES, self._ir_ventas),
+            ("Estadísticas", ft.icons.BAR_CHART_ROUNDED, self._ir_estadisticas),
             ("Cerrar Sesión", AppIcons.LOGOUT, self._logout),
         ]
 
@@ -206,6 +208,11 @@ class DashboardModule:
         self.content_area.update()
         if hasattr(module, 'cargar') and callable(module.cargar):
             module.cargar()
+
+    def _ir_estadisticas(self, e=None) -> None:
+        layout, module = estadisticas_view(self.page, self.content_area)
+        self.content_area.content = layout
+        self.content_area.update()
 
     def _logout(self, e=None) -> None:
         """Cierra sesión y vuelve al login."""

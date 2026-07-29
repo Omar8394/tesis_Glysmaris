@@ -73,7 +73,7 @@ class EstadisticasView(ft.Column):
 
         if not resultado.exito:
             lista_barras.controls.append(
-                ft.Text(resultado.mensaje, color="red-600"),
+                ft.Text(resultado.mensaje, color="red600"),
             )
         elif not resultado.datos:
             lista_barras.controls.append(
@@ -100,7 +100,7 @@ class EstadisticasView(ft.Column):
                         ft.ProgressBar(
                             value=porcentaje,
                             color=ft.colors.PRIMARY,
-                            bgcolor="grey-200",
+                            bgcolor="grey200",
                             height=8,
                         ),
                     ],
@@ -134,7 +134,7 @@ class EstadisticasView(ft.Column):
         col_baja = ft.Column(spacing=10)
 
         if not resultado.exito:
-            col_alta.controls.append(ft.Text(resultado.mensaje, color="red-600"))
+            col_alta.controls.append(ft.Text(resultado.mensaje, color="red600"))
         else:
             recs = resultado.datos
 
@@ -146,13 +146,13 @@ class EstadisticasView(ft.Column):
                                 ft.Text(
                                     f"🔥 {item['nombre']}",
                                     weight="bold",
-                                    color="green-900",
+                                    color="green900",
                                 ),
-                                ft.Text(item["razon"], size=12, color="green-800"),
+                                ft.Text(item["razon"], size=12, color="green800"),
                             ]
                         ),
-                        bgcolor="green-50",
-                        border=ft.border.all(1, "green-300"),
+                        bgcolor="green50",
+                        border=ft.border.all(1, "green300"),
                         padding=10,
                         border_radius=8,
                     )
@@ -166,13 +166,13 @@ class EstadisticasView(ft.Column):
                                 ft.Text(
                                     f"❄️ {item['nombre']}",
                                     weight="bold",
-                                    color="red-900",
+                                    color="red900",
                                 ),
-                                ft.Text(item["razon"], size=12, color="red-800"),
+                                ft.Text(item["razon"], size=12, color="red800"),
                             ]
                         ),
-                        bgcolor="red-50",
-                        border=ft.border.all(1, "red-300"),
+                        bgcolor="red50",
+                        border=ft.border.all(1, "red300"),
                         padding=10,
                         border_radius=8,
                     )
@@ -191,7 +191,7 @@ class EstadisticasView(ft.Column):
                             ft.Text(
                                 "Aumentar Producción / Stock",
                                 weight="bold",
-                                color="green-700",
+                                color="green700",
                             ),
                             col_alta,
                         ],
@@ -203,7 +203,7 @@ class EstadisticasView(ft.Column):
                             ft.Text(
                                 "Congelar / Producir Bajo Pedido",
                                 weight="bold",
-                                color="red-700",
+                                color="red700",
                             ),
                             col_baja,
                         ],
@@ -234,7 +234,7 @@ class EstadisticasView(ft.Column):
         contenido_extra = None
 
         if not resultado.exito:
-            contenido_extra = ft.Text(resultado.mensaje, color="red-600")
+            contenido_extra = ft.Text(resultado.mensaje, color="red600")
         elif not resultado.datos:
             contenido_extra = ft.Text(resultado.mensaje or "No hay mermas registradas.")
         else:
@@ -248,7 +248,7 @@ class EstadisticasView(ft.Column):
                             ft.DataCell(
                                 ft.Text(
                                     f"${m['costo_total_perdida']:.2f}",
-                                    color="red-600",
+                                    color="red600",
                                     weight="bold",
                                 )
                             ),

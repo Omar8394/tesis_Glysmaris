@@ -77,36 +77,37 @@ class IngredienteService(CRUDService):
             if not valido:
                 return ServiceResult.error(msg)
 
-            # ✅ "stock" llega como CANTIDAD DE ARTÍCULOS (ej. 1 bolsa) y
-            # "contenido_unidad" como cuánto trae cada uno, en la MISMA
-            # unidad_medida del ingrediente (ej. 500 -> 500g por bolsa).
-            # Todo el resto del sistema (Producción, recetas, PEPS) trabaja
-            # directo contra stock_actual asumiendo que ya está en unidad
-            # base, así que la conversión tiene que pasar acá, una sola vez,
-            # antes de que el dato toque la base de datos.
             datos = dict(datos)
-            contenido_unidad = float(datos.get("contenido_unidad") or 1)
-            if contenido_unidad <= 0:
-                contenido_unidad = 1
-            datos["contenido_unidad"] = contenido_unidad
-            datos["stock"] = float(datos.get("stock", 0)) * contenido_unidad
 
             # Buscamos si el ingrediente base ya existe en el catálogo maestro
-            # (Usando el método que ya tienes programado en tu capa de datos)
             resultado_existente = self.obtener_por_nombre(datos["nombre"])
-            
+
             if resultado_existente.exito and resultado_existente.datos:
-                # Caso A: El ingrediente ya existe. Conseguimos su ID y creamos un lote nuevo
+                # Caso A: ya existe -> el "contenido por unidad" real es el que
+                # ya tiene guardado el maestro, NO lo que haya tipeado el
+                # usuario en este formulario en blanco (evita que un lote nuevo
+                # quede mal calculado si no repite el número original).
                 id_ingrediente = resultado_existente.datos["id_ingrediente"]
+                contenido_unidad = float(resultado_existente.datos.get("contenido_unidad") or 1)
+                if contenido_unidad <= 0:
+                    contenido_unidad = 1
+                datos["contenido_unidad"] = contenido_unidad
+                datos["stock"] = float(datos.get("stock", 0)) * contenido_unidad
+
                 self._repository.crear_lote(id_ingrediente, datos)
                 return ServiceResult.ok(mensaje="Se ha registrado un nuevo lote para el ingrediente existente.")
             else:
-                # Caso B: Es un ingrediente 100% nuevo. Primero se registra en la tabla MAESTRA
+                # Caso B: 100% nuevo -> el contenido_unidad viene del formulario.
+                contenido_unidad = float(datos.get("contenido_unidad") or 1)
+                if contenido_unidad <= 0:
+                    contenido_unidad = 1
+                datos["contenido_unidad"] = contenido_unidad
+                datos["stock"] = float(datos.get("stock", 0)) * contenido_unidad
+
                 id_ingrediente = self._repository.crear(datos)
-                # Inmediatamente después, se registra su primer LOTE vinculado a ese ID
                 self._repository.crear_lote(id_ingrediente, datos)
                 return ServiceResult.ok(mensaje="Ingrediente y lote inicial creados exitosamente.")
-                
+
         except Exception as ex:
             return ServiceResult.error(str(ex))
 

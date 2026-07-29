@@ -104,11 +104,13 @@ class ProductoService(CRUDService):
 
     def eliminar(self, identificador: int) -> ServiceResult:
         try:
+            print("ENTRE")
             success = self._repo.eliminar(identificador)
             if not success:
                 return ServiceResult.error("No se pudo desactivar el producto.")
             return ServiceResult.ok("Producto desactivado.")
         except Exception as e:
+            print("EXCEPTION")
             return ServiceResult.error(str(e))
 
     def buscar(self, texto: str) -> ServiceResult:
