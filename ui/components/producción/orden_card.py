@@ -220,7 +220,7 @@ class OrdenCard(ft.Card):
                 botones.append(
                     BotonPrimario(
                         texto="Iniciar",
-                        icono=AppIcons.PLAY,
+                        icono=ft.icons.PLAY_ARROW, 
                         on_click=lambda e: self._ejecutar_callback(self.on_iniciar),
                         expand=True,
                         width=None,
@@ -253,7 +253,7 @@ class OrdenCard(ft.Card):
                 botones.append(
                     BotonPrimario(
                         texto="Continuar",
-                        icono=AppIcons.PLAY,
+                        icono=ft.icons.PLAY_ARROW, 
                         on_click=lambda e: self._ejecutar_callback(self.on_continuar),
                         expand=True,
                         width=None,

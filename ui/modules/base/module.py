@@ -217,8 +217,9 @@ class Module(ABC):
         """
         El módulo se oculta. Guardamos el estado.
         """
-        # Guardamos el estado automáticamente
-        self._guardar_estado()
+        estado = self._extraer_estado()
+        for clave, valor in estado.items():
+            self.guardar_estado(clave, valor)
 
     def on_destroy(self) -> None:
         """

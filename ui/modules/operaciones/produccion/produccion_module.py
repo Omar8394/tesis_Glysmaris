@@ -128,7 +128,11 @@ class ProduccionModule(Module):
             on_ver_detalle=self._ver_detalle,
             on_cancelar=self._cancelar_orden,
         )
-        if self.page:
+        # ✅ chequear que el CONTROL ya esté adjunto a la página (no que
+        # exista self.page), porque en la primera navegación a este módulo
+        # on_show()/cargar() corren antes de que module_registry.mostrar()
+        # devuelva la vista y el caller la agregue a la página.
+        if self.panel_estados.page:
             self.panel_estados.update()
 
     def _aplicar_filtros(self):
@@ -274,13 +278,16 @@ class ProduccionModule(Module):
             self._dialogo = None
 
     def _crear_orden_desde_wizard(self, datos):
-        resultado = self.servicio.crear_orden(datos)
-        if resultado.exito:
-            MensajeSistema.exito(
-                self.page,
-                "Orden {} creada.".format(resultado.datos["orden"]["numero_orden"])
-            )
-            self._cerrar_dialogo()
-            self.cargar()
-        else:
-            MensajeSistema.error(self.page, resultado.mensaje)
+        # El wizard (ProduccionWizard._guardar) ya llamó a
+        # produccion_service.crear_orden() y solo invoca este callback si
+        # salió bien. 'datos' acá ES el resultado ya creado
+        # ({"orden": {...}, "detalles": [...]}), no hay que reenviarlo a
+        # crear_orden() -- eso duplicaba el intento de creación y fallaba
+        # la validación por la forma distinta del dict.
+        orden = datos.get("orden", {}) or {}
+        MensajeSistema.exito(
+            self.page,
+            "Orden {} creada.".format(orden.get("numero_orden", "N/A"))
+        )
+        self._cerrar_dialogo()
+        self.cargar()

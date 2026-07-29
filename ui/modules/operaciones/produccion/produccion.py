@@ -11,4 +11,6 @@ from ui.modules.operaciones.produccion.produccion_module import ProduccionModule
 def produccion_view(page, content_area):
     module = ProduccionModule(page, content_area)
     layout = module.construir()
+    module.inicializar()
+    module.on_show()
     return layout, module

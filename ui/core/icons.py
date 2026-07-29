@@ -139,4 +139,6 @@ class AppIcons:
     TOGGLE_ON = ft.icons.TOGGLE_ON
     TOGGLE_OFF = ft.icons.TOGGLE_OFF
     FATORY = ft.icons.FACTORY_ROUNDED
+    PLAY = ft.icons.PLAY_ARROW
+    EYE = ft.icons.VISIBILITY_ROUNDED
 

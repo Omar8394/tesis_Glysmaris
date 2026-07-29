@@ -751,7 +751,7 @@ class ProduccionWizard(ft.Container):
             ],
             "costo_estimado": self.analisis_resultados.get("costo_estimado", 0),
             "tiempo_estimado_minutos": self.analisis_resultados.get("tiempo_estimado", 0),
-            "creado_por": self.page.session.get("usuario", "admin") if self.page else "admin",
+            "creado_por": (self.page.session.get("usuario") or "admin") if self.page else "admin",
         }
 
         resultado = self.produccion_service.crear_orden(datos_orden)

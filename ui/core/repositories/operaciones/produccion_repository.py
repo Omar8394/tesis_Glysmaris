@@ -432,9 +432,10 @@ class ProduccionRepository(CRUDRepository):
             ORDER BY id_orden DESC LIMIT 1
         """)
         row = cursor.fetchone()
-        return row[0] if row else None
+        return row["numero_orden"] if row else None
 
     def contar_ordenes_por_estado(self, estado: str) -> int:
         cursor = self._cursor()
-        cursor.execute("SELECT COUNT(*) FROM PRODUCCION_ORDENES WHERE estado = %s", (estado,))
-        return cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) AS total FROM PRODUCCION_ORDENES WHERE estado = %s", (estado,))
+        row = cursor.fetchone()
+        return row["total"] if row else 0
