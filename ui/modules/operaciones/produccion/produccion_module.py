@@ -227,7 +227,7 @@ class ProduccionModule(Module):
             width=500,
         )
 
-        Dialogo.personalizado(
+        self._dialogo = Dialogo.personalizado(      # <-- guardar la referencia
             page=self.page,
             titulo="Detalle de orden",
             contenido=contenido,

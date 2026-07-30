@@ -43,17 +43,23 @@ class VentaService(CRUDService):
         for item in carrito:
             producto = item['producto']
             cantidad = item['cantidad']
-            precio_unitario = producto.get('precio_venta', 0)
+            # precio_venta viene de la BD como decimal.Decimal (columna NUMERIC/DECIMAL).
+            # Python no permite mezclar float y Decimal en una misma operación,
+            # así que convertimos explícitamente a float desde el inicio.
+            precio_unitario = float(producto.get('precio_venta', 0) or 0)
             subtotal_producto = precio_unitario * cantidad
 
             agregados = []
             for agg in item.get('agregados', []):
-                sub_agg = agg.get('costo', 0)
+                cantidad_agg = agg.get('cantidad', 1)
+                # agg['costo'] también puede venir como Decimal (costo_unitario * cantidad
+                # calculado en PanelAgregados._agregar).
+                sub_agg = float(agg.get('costo', 0) or 0)
                 agregados.append({
                     'id_activo': agg['id_activo'],
                     'nombre_activo': agg['nombre'],
-                    'cantidad': agg.get('cantidad', 1),
-                    'costo_unitario': sub_agg / agg.get('cantidad', 1) if agg.get('cantidad') else sub_agg,
+                    'cantidad': cantidad_agg,
+                    'costo_unitario': sub_agg / cantidad_agg if cantidad_agg else sub_agg,
                     'subtotal': sub_agg,
                 })
                 subtotal_producto += sub_agg

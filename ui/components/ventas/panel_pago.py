@@ -23,7 +23,7 @@ class PanelPago(ft.Column):
 
         # Grid de métodos
         self.grid_pagos = ft.Row(wrap=True, spacing=10)
-        
+
         for metodo in self.metodos_pago:
             btn = self._crear_tarjeta_metodo(metodo)
             self.tarjetas_ui[metodo['nombre']] = btn
@@ -109,7 +109,7 @@ class PanelPago(ft.Column):
         self.campos_montos.controls.clear()
         for metodo, monto in self.montos.items():
             campo = CampoTexto(
-                label=f"Monto ({metodo})",
+                etiqueta=f"Monto ({metodo})",
                 value=str(monto) if monto > 0 else "",
                 width=200,
                 keyboard_type=ft.KeyboardType.NUMBER,

@@ -25,6 +25,8 @@ from ui.core.services.operaciones.produccion_service import ProduccionService
 from ui.core.repositories.operaciones.produccion_repository import ProduccionRepository
 from ui.core.repositories.operaciones.estadisticas_repository import EstadisticasRepository
 from ui.core.services.operaciones.estadisticas_service import EstadisticasService
+from ui.core.repositories.operaciones.ventas_repository import VentaRepository
+from ui.core.services.operaciones.ventas_service import VentaService
 
 class ServiceFactory:
     """Crea y cachea servicios."""
@@ -88,6 +90,14 @@ class ServiceFactory:
             cls._instances["produccion"] = service
         return cls._instances["produccion"]
 
+
+    @classmethod
+    def get_venta_service(cls) -> VentaService:
+        if "venta" not in cls._instances:
+            db = DatabaseFactory.get_operaciones()
+            repo = VentaRepository(db)
+            cls._instances["venta"] = VentaService(repo)
+        return cls._instances["venta"]
 
     @classmethod
     def get_estadisticas_service(cls) -> EstadisticasService:

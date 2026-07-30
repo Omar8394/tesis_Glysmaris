@@ -1,23 +1,3 @@
-"""
-============================================================
-Sistema La Dulce Tía
-
-Archivo:
-    boton.py
-
-Responsabilidad:
-    Componentes reutilizables para botones.
-
-Utilizado por:
-    Todas las vistas del sistema.
-
-No debe:
-    - Acceder a la base de datos.
-    - Importar vistas.
-    - Contener lógica del negocio.
-============================================================
-"""
-
 from __future__ import annotations
 
 import flet as ft
@@ -41,20 +21,22 @@ class BotonPrimario(ft.ElevatedButton):
         expand: bool = False,
         width=None,
         disabled=False,
+        height=AppSize.BUTTON_HEIGHT,
     ):
         tema = ThemeManager.theme
 
         # Construir contenido con texto e icono
+        self._texto_control = ft.Text(
+            texto,
+            size=AppTypography.BUTTON_SIZE,
+            weight=AppTypography.SEMIBOLD,
+            font_family=AppTypography.FONT_FAMILY,
+            color=tema.button_text,
+        )
         contenido = ft.Row(
             [
                 ft.Icon(icono, color=tema.button_text) if icono else ft.Container(),
-                ft.Text(
-                    texto,
-                    size=AppTypography.BUTTON_SIZE,
-                    weight=AppTypography.SEMIBOLD,
-                    font_family=AppTypography.FONT_FAMILY,
-                    color=tema.button_text,
-                ),
+                self._texto_control,
             ],
             alignment=ft.MainAxisAlignment.CENTER,
             spacing=8,
@@ -65,13 +47,29 @@ class BotonPrimario(ft.ElevatedButton):
             expand=expand,
             disabled=disabled,
             width=width or AppSize.BUTTON_MEDIUM_WIDTH,
-            height=AppSize.BUTTON_HEIGHT,
+            height=height,
             bgcolor=tema.primary,
             style=ft.ButtonStyle(
                 shape=ft.RoundedRectangleBorder(radius=AppRadius.BUTTON),
             ),
             content=contenido,
         )
+
+    @property
+    def text(self) -> str:
+        """Texto visible del botón (el Text real dentro del content)."""
+        return self._texto_control.value
+
+    @text.setter
+    def text(self, value: str):
+        # ft.ElevatedButton asigna internamente self.text = None durante su
+        # propio __init__ (aunque no le pasemos ese parámetro). Como "text"
+        # ahora es nuestra propiedad, esa asignación pasaría por aquí y
+        # borraría el texto real que ya armamos en self._texto_control.
+        # La ignoramos para no pisar el valor construido.
+        if value is None:
+            return
+        self._texto_control.value = value
 
 
 class BotonSecundario(BotonPrimario):
@@ -86,6 +84,7 @@ class BotonSecundario(BotonPrimario):
         on_click=None,
         expand=False,
         width=None,
+        height=AppSize.BUTTON_HEIGHT,
     ):
         super().__init__(
             texto=texto,
@@ -93,6 +92,7 @@ class BotonSecundario(BotonPrimario):
             on_click=on_click,
             expand=expand,
             width=width,
+            height=height,
         )
         tema = ThemeManager.theme
         self.bgcolor = tema.surface
@@ -103,7 +103,6 @@ class BotonSecundario(BotonPrimario):
                     child.color = tema.text
                 elif isinstance(child, ft.Icon):
                     child.color = tema.text
-
 
 class BotonPeligro(BotonPrimario):
     """

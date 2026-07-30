@@ -91,6 +91,7 @@ class ProductoWizard(ft.Container):
         self.calcular_preview = calcular_preview
         self.obtener_tasas_hora = obtener_tasas_hora
         self._tasas_hora_cache: dict | None = None
+        self._es_torta: bool = False
 
         self.categorias = categorias or [
             "Tortas", "Postres", "Cupcakes", "Donas",
@@ -277,6 +278,10 @@ class ProductoWizard(ft.Container):
             self.txt_nombre.update()
         return True
 
+    # Nuevo método:
+    def _actualizar_es_torta(self, e=None):
+        self._es_torta = (self.dd_categoria.value or "") == "Tortas"
+
     # =====================================================
     # PASO: INFORMACIÓN
     # =====================================================
@@ -288,12 +293,16 @@ class ProductoWizard(ft.Container):
             width=350,
             value=datos.get("nombre", ""),
         )
+
         self.dd_categoria = Selector(
-            etiqueta="Categoría",
-            opciones=self.categorias,
-            valor=datos.get("categoria"),
-            width=250,
+        etiqueta="Categoría",
+        opciones=self.categorias,
+        valor=datos.get("categoria"),
+        width=250,
+        on_change=self._actualizar_es_torta,   # 👈 nuevo
         )
+        self._actualizar_es_torta() 
+        
         self.txt_descripcion = CampoTexto(
             etiqueta="Descripción",
             multiline=True,

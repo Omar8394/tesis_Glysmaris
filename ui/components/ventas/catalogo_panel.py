@@ -34,10 +34,10 @@ class CatalogoPanel(ft.Column):
         # Grid de tarjetas estilizado
         self.grid = ft.GridView(
             expand=True,
-            max_extent=240,               # Ampliado ligeramente para acomodar botones cómodamente
+            max_extent=300,               # Tarjetas más grandes
             spacing=AppSpacing.CONTROL_SPACING,
             run_spacing=AppSpacing.CONTROL_SPACING,
-            child_aspect_ratio=1.35,      # Proporción adecuada para evitar truncar textos
+            child_aspect_ratio=1.05,      # Más cuadradas, con más espacio interno
         )
 
         self.controls = [
@@ -47,6 +47,12 @@ class CatalogoPanel(ft.Column):
         ]
 
         self.actualizar_grid()
+
+    def actualizar_productos(self, productos):
+        """Reemplaza la lista de productos y refresca categorías, filtro y grid."""
+        self.productos = productos
+        self.filtro_categoria.opciones = self.obtener_categorias()
+        self.filtrar()  # reaplica el filtro actual (búsqueda/categoría/agotados) y llama a actualizar_grid()
 
     def obtener_categorias(self):
         cats = set(p.get('categoria') for p in self.productos if p.get('categoria'))
@@ -74,4 +80,4 @@ class CatalogoPanel(ft.Column):
             )
             self.grid.controls.append(tarjeta)
         if self.page:
-            self.update()  
+            self.update()

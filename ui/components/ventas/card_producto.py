@@ -32,7 +32,7 @@ class CardProductoVenta(ft.Card):
 
         # Encabezado con Icono con Fondo Suave
         icono_prod = producto.get('icono', ft.icons.INVENTORY_2_OUTLINED)
-        
+
         header = ft.Row(
             [
                 ft.Container(
@@ -66,7 +66,7 @@ class CardProductoVenta(ft.Card):
                         self.btn_agregar
                     ],
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                    cross_axis_alignment=ft.CrossAxisAlignment.CENTER
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER
                 )
             ],
             spacing=AppSpacing.SM,
@@ -74,8 +74,8 @@ class CardProductoVenta(ft.Card):
 
         self.content = ft.Container(
             content=contenido,
-            padding=AppSpacing.MD,
-            border_radius=12,
+            padding=18,
+            border_radius=14,
             border=ft.border.all(1, "grey-300"),
             bgcolor="white",
         )
@@ -99,10 +99,11 @@ class CardProductoVenta(ft.Card):
         self.btn_agregar.bgcolor = ft.colors.GREEN_600
         self.btn_agregar.update()
 
-        import asyncio
-        async def restaurar():
-            await asyncio.sleep(0.6)
+        import threading
+
+        def restaurar():
             self.btn_agregar.text = "Agregar"
             self.btn_agregar.bgcolor = None
             self.btn_agregar.update()
-        asyncio.create_task(restaurar())
+
+        threading.Timer(0.6, restaurar).start()

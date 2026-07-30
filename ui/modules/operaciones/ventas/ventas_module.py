@@ -20,7 +20,7 @@ class VentasModule(Module):
         # Llamamos al constructor base con page y usuario (sin usuario)
         super().__init__(page, usuario=None)
         self.content_area = content_area
-        self.producto_service = ServiceFactory.get_producto_service()
+        self.venta_service = ServiceFactory.get_venta_service()
         self.activo_service = ServiceFactory.get_activo_service()
         # Si tienes cliente_service, descomenta la siguiente línea
         # self.cliente_service = ServiceFactory.get_cliente_service()
@@ -48,10 +48,9 @@ class VentasModule(Module):
             self.view.actualizar_carrito(self.carrito)
 
     def _cargar_productos(self) -> list:
-        """Obtiene productos disponibles para la venta (con stock > 0)."""
+        """Obtiene productos ya finalizados en producción y con stock vendible."""
         try:
-            resultado = self.producto_service.listar_disponibles()
-            return resultado.datos if resultado.exito else []
+            return self.venta_service.listar_productos_disponibles()
         except Exception:
             return []
 
@@ -107,23 +106,47 @@ class VentasModule(Module):
 
     def finalizar_venta(self, datos_pago: dict):
         """
-        Finaliza la venta: guarda en base de datos, descuenta stocks, limpia carrito.
+        Finaliza la venta: persiste en base de datos vía VentaService
+        (que valida el carrito, arma el detalle y descuenta stock FIFO),
+        y limpia el carrito si todo sale bien.
         """
-        # Aquí deberías llamar a un servicio de ventas para persistir.
-        # Por ahora solo mostramos un mensaje de éxito.
-        MensajeSistema.exito(self.page, "Venta registrada correctamente.")
-        self.carrito.clear()
-        self.view.mostrar_carrito()
-        self.view.actualizar_carrito(self.carrito)
+        pagos = [
+            {'metodo_pago': metodo, 'monto': monto}
+            for metodo, monto in datos_pago.items()
+        ]
+
+        resultado = self.venta_service.finalizar_venta(
+            carrito=self.carrito,
+            pagos=pagos,
+            cliente=None,
+            usuario=self.usuario,
+        )
+
+        if resultado.exito:
+            MensajeSistema.exito(self.page, resultado.mensaje)
+            self.carrito.clear()
+            self.view.mostrar_carrito()
+            self.view.actualizar_carrito(self.carrito)
+        else:
+            MensajeSistema.error(self.page, resultado.mensaje)
 
     def _calcular_total(self) -> float:
-        """Calcula el total del carrito (productos + agregados)."""
+        """Calcula el total del carrito (productos + agregados).
+
+        precio_venta / costo suelen venir de la base de datos como
+        decimal.Decimal (columnas NUMERIC/DECIMAL). Python no permite
+        mezclar float y Decimal en una misma operación aritmética, así
+        que convertimos explícitamente a float antes de sumar.
+        """
         total = 0.0
         for item in self.carrito:
-            precio = item['producto'].get('precio_venta', 0)
+            precio = float(item['producto'].get('precio_venta', 0) or 0)
             total += precio * item['cantidad']
             for agg in item.get('agregados', []):
-                total += agg.get('costo', 0) * agg.get('cantidad', 1)
+                # agg['costo'] ya es el costo total de esa línea (costo_unitario * cantidad),
+                # calculado en PanelAgregados._agregar — no volver a multiplicar por cantidad aquí.
+                costo = float(agg.get('costo', 0) or 0)
+                total += costo
         return total
 
     # ------------------------------------------------------------

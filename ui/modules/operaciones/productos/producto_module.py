@@ -409,13 +409,10 @@ class ProductoModule:
         return [{"id": a.get("id_activo"), "nombre": a.get("nombre")} for a in activos]
 
     def _calcular_preview(self, datos: dict) -> dict:
-        """
-        Le pasa al wizard un cálculo de costo/precio en vivo (sin guardar
-        nada), para que pueda sugerir el precio de cada presentación
-        mientras el usuario todavía está completando el producto.
-        """
         resultado = self._producto_service.calcular_preview(datos)
         if resultado.fallo:
+            # al menos loguealo mientras depurás, para no volar el error en silencio
+            print(f"[calcular_preview] falló: {resultado.mensaje}")
             return {}
         return resultado.datos or {}
 

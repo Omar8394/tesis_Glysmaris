@@ -1,24 +1,3 @@
-"""
-============================================================
-Sistema La Dulce Tía
-
-Archivo:
-    schema.py
-
-Responsabilidad:
-    Definir el esquema de la base de datos de operaciones.
-
-    Contiene las sentencias CREATE TABLE para todas las tablas
-    del negocio (ingredientes, productos, recetas, producción,
-    ventas, compras, gastos, etc.).
-
-    No contiene lógica de negocio ni datos de prueba.
-
-Autor:
-    Proyecto La Dulce Tía
-============================================================
-"""
-
 SCHEMA_OPERACIONES = [
     # ============================================================
     # 1. INGREDIENTES (Catálogo de insumos y materias primas)
@@ -32,13 +11,6 @@ SCHEMA_OPERACIONES = [
         perecedero BOOLEAN DEFAULT FALSE,
         refrigerado BOOLEAN DEFAULT FALSE,
         descripcion TEXT,
-        -- ✅ Antes era texto libre ("1kg / 200ml") y nunca se usaba en los
-        -- cálculos de stock. Ahora es numérico: cuánto trae CADA artículo,
-        -- expresado en la misma unidad_medida de arriba (ej. si
-        -- unidad_medida='g' y contenido_unidad=500, cada artículo trae
-        -- 500g). El service lo multiplica por la cantidad de artículos al
-        -- crear un lote, para que stock_actual en LOTES_INVENTARIO quede
-        -- siempre en unidad base (lo que ya esperan Producción y recetas).
         contenido_unidad DECIMAL(10,4) NOT NULL DEFAULT 1
     )
     """,
@@ -57,7 +29,6 @@ SCHEMA_OPERACIONES = [
         FOREIGN KEY (id_ingrediente) REFERENCES INGREDIENTES(id_ingrediente) ON DELETE CASCADE
     )
     """,
-
     # ============================================================
     # 1C. PERDIDAS_INVENTARIO (Historial de mermas/bajas por lote)
     # ============================================================
@@ -81,7 +52,6 @@ SCHEMA_OPERACIONES = [
         FOREIGN KEY (id_lote) REFERENCES LOTES_INVENTARIO(id_lote) ON DELETE SET NULL
     )
     """,
-
     # ============================================================
     # 2. RECETAS (independientes de productos)
     # ============================================================
@@ -141,22 +111,22 @@ SCHEMA_OPERACIONES = [
         precio_final DECIMAL(10,2) DEFAULT 0,
         precio_combo DECIMAL(10,2) DEFAULT 0,
         descuento_combo DECIMAL(5,2) DEFAULT 0,
-
         FOREIGN KEY (receta_id) REFERENCES RECETAS(id_receta) ON DELETE SET NULL,
         FOREIGN KEY (producto_padre_id) REFERENCES PRODUCTOS(id_producto) ON DELETE SET NULL
     )
     """,
     # ============================================================
-    # 5. PODUCTO_PRESENTACIONES
+    # 5. PRODUCTO_PRESENTACIONES
     # ============================================================
-   """
-        CREATE TABLE IF NOT EXISTS PRODUCTO_PRESENTACIONES (
-            id_presentacion INT AUTO_INCREMENT PRIMARY KEY,
-            id_producto INT NOT NULL,
-            nombre VARCHAR(100) NOT NULL,
-            precio DECIMAL(10,2) NOT NULL DEFAULT 0,
-            FOREIGN KEY (id_producto) REFERENCES PRODUCTOS(id_producto) ON DELETE CASCADE
-    )""",
+    """
+    CREATE TABLE IF NOT EXISTS PRODUCTO_PRESENTACIONES (
+        id_presentacion INT AUTO_INCREMENT PRIMARY KEY,
+        id_producto INT NOT NULL,
+        nombre VARCHAR(100) NOT NULL,
+        precio DECIMAL(10,2) NOT NULL DEFAULT 0,
+        FOREIGN KEY (id_producto) REFERENCES PRODUCTOS(id_producto) ON DELETE CASCADE
+    )
+    """,
     # ============================================================
     # 6. PRODUCTO_COMPONENTES
     # ============================================================
@@ -171,12 +141,10 @@ SCHEMA_OPERACIONES = [
         FOREIGN KEY (id_producto) REFERENCES PRODUCTOS(id_producto) ON DELETE CASCADE,
         FOREIGN KEY (id_ingrediente) REFERENCES INGREDIENTES(id_ingrediente) ON DELETE RESTRICT,
         FOREIGN KEY (id_producto_componente) REFERENCES PRODUCTOS(id_producto) ON DELETE RESTRICT
-)
+    )
     """,
-
-
     """
-        CREATE TABLE IF NOT EXISTS PRODUCTO_ACTIVO (
+    CREATE TABLE IF NOT EXISTS PRODUCTO_ACTIVO (
         id_producto INT NOT NULL,
         id_activo INT NOT NULL,
         cantidad_necesaria DECIMAL(10,4) NOT NULL DEFAULT 1,
@@ -186,20 +154,38 @@ SCHEMA_OPERACIONES = [
     )
     """,
     """
-        CREATE TABLE IF NOT EXISTS PRODUCTO_COMBO_ITEMS (
+    CREATE TABLE IF NOT EXISTS PRODUCTO_COMBO_ITEMS (
         id_producto_combo INT NOT NULL,
         id_producto_incluido INT NOT NULL,
         cantidad DECIMAL(10,2) NOT NULL DEFAULT 1,
         PRIMARY KEY (id_producto_combo, id_producto_incluido),
         FOREIGN KEY (id_producto_combo) REFERENCES PRODUCTOS(id_producto) ON DELETE CASCADE,
         FOREIGN KEY (id_producto_incluido) REFERENCES PRODUCTOS(id_producto) ON DELETE RESTRICT
-        )
+    )
     """,
 
+    # ============================================================
+    # ----- NUEVAS TABLAS DE CLIENTES Y CXC (insertadas aquí) -----
+    # ============================================================
+    # CLIENTES debe ir antes de VENTAS (futura FK)
+    """
+    CREATE TABLE IF NOT EXISTS CLIENTES (
+        id_cliente INT AUTO_INCREMENT PRIMARY KEY,
+        nombre VARCHAR(100) NOT NULL,
+        cedula VARCHAR(20) UNIQUE,
+        telefono VARCHAR(20),
+        direccion VARCHAR(200),
+        observaciones TEXT,
+        activo BOOLEAN DEFAULT TRUE,
+        fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_nombre (nombre),
+        INDEX idx_cedula (cedula)
+    )
+    """,
 
-    #============================================================
-    #7. PRODUCCION_ORDENES (Cabecera de la orden de producción)
-    #============================================================
+    # ============================================================
+    # 7. PRODUCCION_ORDENES (Cabecera de la orden de producción)
+    # ============================================================
     """
     CREATE TABLE IF NOT EXISTS PRODUCCION_ORDENES (
         id_orden INT AUTO_INCREMENT PRIMARY KEY,
@@ -224,16 +210,15 @@ SCHEMA_OPERACIONES = [
         INDEX idx_numero (numero_orden)
     )
     """,
-
-#============================================================
-# 8. PRODUCCION_DETALLE (Productos incluidos en la orden)
-#============================================================
+    # ============================================================
+    # 8. PRODUCCION_DETALLE (Productos incluidos en la orden)
+    # ============================================================
     """
     CREATE TABLE IF NOT EXISTS PRODUCCION_DETALLE (
         id_detalle INT AUTO_INCREMENT PRIMARY KEY,
         id_orden INT NOT NULL,
         id_producto INT NOT NULL,
-        id_presentacion INT NULL,                              -- Presentación específica
+        id_presentacion INT NULL,
         cantidad_planificada INT NOT NULL DEFAULT 1,
         cantidad_obtenida INT DEFAULT 0,
         precio_final DECIMAL(10,2) DEFAULT 0,
@@ -248,16 +233,15 @@ SCHEMA_OPERACIONES = [
         INDEX idx_producto (id_producto)
     )
     """,
-
-    #============================================================
-    #9. PRODUCCION_MERMAS
-    #============================================================
+    # ============================================================
+    # 9. PRODUCCION_MERMAS
+    # ============================================================
     """
     CREATE TABLE IF NOT EXISTS PRODUCCION_MERMAS (
         id_merma INT AUTO_INCREMENT PRIMARY KEY,
         id_orden INT NOT NULL,
-        id_detalle INT NULL,                                   -- Detalle al que pertenece (opcional)
-        id_producto INT NULL,                                  -- Producto afectado (opcional)
+        id_detalle INT NULL,
+        id_producto INT NULL,
         cantidad DECIMAL(10,2) NOT NULL,
         tipo_merma ENUM('recuperable', 'no_recuperable') NOT NULL,
         motivo ENUM(
@@ -268,7 +252,7 @@ SCHEMA_OPERACIONES = [
             'decoracion',
             'otro'
         ) NOT NULL,
-        descripcion TEXT,                                      -- Solo para 'otro' o detalles extra
+        descripcion TEXT,
         costo_asociado DECIMAL(10,2) DEFAULT 0,
         fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (id_orden) REFERENCES PRODUCCION_ORDENES(id_orden) ON DELETE CASCADE,
@@ -278,16 +262,15 @@ SCHEMA_OPERACIONES = [
         INDEX idx_detalle (id_detalle)
     )
     """,
-
-    #============================================================
-    #10. PRODUCCION_SUBPRODUCTOS (Generados a partir de mermas recuperables)
-    #============================================================
+    # ============================================================
+    # 10. PRODUCCION_SUBPRODUCTOS (Generados a partir de mermas recuperables)
+    # ============================================================
     """
     CREATE TABLE IF NOT EXISTS PRODUCCION_SUBPRODUCTOS (
         id_subproducto INT AUTO_INCREMENT PRIMARY KEY,
         id_merma INT NOT NULL,
-        id_detalle INT NULL,                                   -- Detalle de origen (opcional)
-        id_producto_subproducto INT NOT NULL,                  -- Producto que se genera (ej: "Bizcocho molido")
+        id_detalle INT NULL,
+        id_producto_subproducto INT NOT NULL,
         cantidad DECIMAL(10,2) NOT NULL,
         unidad VARCHAR(30),
         fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -297,18 +280,17 @@ SCHEMA_OPERACIONES = [
         INDEX idx_merma (id_merma)
     )
     """,
-
-    #============================================================
-    #11. PRODUCCION_INGREDIENTES_RESERVADOS (Reserva y consumo de ingredientes)
-    #============================================================
+    # ============================================================
+    # 11. PRODUCCION_INGREDIENTES_RESERVADOS (Reserva y consumo de ingredientes)
+    # ============================================================
     """
     CREATE TABLE IF NOT EXISTS PRODUCCION_INGREDIENTES_RESERVADOS (
         id_reserva INT AUTO_INCREMENT PRIMARY KEY,
         id_orden INT NOT NULL,
-        id_detalle INT NOT NULL,                               -- Detalle asociado
-        id_producto INT NOT NULL,                              -- Producto que consume el ingrediente
+        id_detalle INT NOT NULL,
+        id_producto INT NOT NULL,
         id_ingrediente INT NOT NULL,
-        id_lote INT NULL,                                      -- Lote específico del que se descuenta
+        id_lote INT NULL,
         cantidad_reservada DECIMAL(10,2) NOT NULL,
         cantidad_consumida DECIMAL(10,2) DEFAULT 0,
         cantidad_devuelta DECIMAL(10,2) DEFAULT 0,
@@ -323,10 +305,9 @@ SCHEMA_OPERACIONES = [
         INDEX idx_producto (id_producto)
     )
     """,
-
-    #============================================================
-    # 2. PRODUCCION_ACTIVOS_RESERVADOS (Reserva de activos/recursos)
-    #============================================================
+    # ============================================================
+    # 12. PRODUCCION_ACTIVOS_RESERVADOS (Reserva de activos/recursos)
+    # ============================================================
     """
     CREATE TABLE IF NOT EXISTS PRODUCCION_ACTIVOS_RESERVADOS (
         id_reserva_activo INT AUTO_INCREMENT PRIMARY KEY,
@@ -345,15 +326,14 @@ SCHEMA_OPERACIONES = [
         INDEX idx_detalle (id_detalle)
     )
     """,
-
-    #============================================================
+    # ============================================================
     # 13. PRODUCCION_COSTOS (Desglose detallado de costos)
     # ============================================================
     """
     CREATE TABLE IF NOT EXISTS PRODUCCION_COSTOS (
         id_costo INT AUTO_INCREMENT PRIMARY KEY,
         id_orden INT NOT NULL,
-        id_detalle INT NULL,                                   -- Opcional: si el costo es específico de un detalle
+        id_detalle INT NULL,
         tipo ENUM('ingrediente', 'activo', 'mano_obra', 'costo_indirecto', 'otro') NOT NULL,
         descripcion VARCHAR(100) NOT NULL,
         valor_estimado DECIMAL(10,2) NOT NULL DEFAULT 0,
@@ -364,9 +344,8 @@ SCHEMA_OPERACIONES = [
         INDEX idx_orden (id_orden)
     )
     """,
-
-    #============================================================
-    #14. PRODUCCION_ANALISIS (Análisis de disponibilidad previo a la orden)
+    # ============================================================
+    # 14. PRODUCCION_ANALISIS (Análisis de disponibilidad previo a la orden)
     # ============================================================
     """
     CREATE TABLE IF NOT EXISTS PRODUCCION_ANALISIS (
@@ -382,54 +361,42 @@ SCHEMA_OPERACIONES = [
         INDEX idx_orden (id_orden)
     )
     """,
+    # ============================================================
+    # 15. ANALISIS_FALTANTES (Detalle de faltantes del análisis)
+    # ============================================================
+    """
+    CREATE TABLE IF NOT EXISTS ANALISIS_FALTANTES (
+        id_faltante INT AUTO_INCREMENT PRIMARY KEY,
+        id_analisis INT NOT NULL,
+        id_ingrediente INT NULL,
+        id_activo INT NULL,
+        necesario DECIMAL(10,2) NOT NULL,
+        disponible DECIMAL(10,2) NOT NULL,
+        faltante DECIMAL(10,2) NOT NULL,
+        FOREIGN KEY (id_analisis) REFERENCES PRODUCCION_ANALISIS(id_analisis) ON DELETE CASCADE,
+        FOREIGN KEY (id_ingrediente) REFERENCES INGREDIENTES(id_ingrediente) ON DELETE SET NULL,
+        FOREIGN KEY (id_activo) REFERENCES ACTIVOS(id_activo) ON DELETE SET NULL,
+        INDEX idx_analisis (id_analisis)
+    )
+    """,
+    # ============================================================
+    # 16. PRODUCCION_HISTORIAL_ESTADOS (Bitácora de cambios de estado)
+    # ============================================================
+    """
+    CREATE TABLE IF NOT EXISTS PRODUCCION_HISTORIAL_ESTADOS (
+        id_historial INT AUTO_INCREMENT PRIMARY KEY,
+        id_orden INT NOT NULL,
+        estado_anterior ENUM('pendiente', 'en_proceso', 'finalizada', 'cancelada') NOT NULL,
+        estado_nuevo ENUM('pendiente', 'en_proceso', 'finalizada', 'cancelada') NOT NULL,
+        fecha_cambio DATETIME DEFAULT CURRENT_TIMESTAMP,
+        usuario VARCHAR(100),
+        observaciones TEXT,
+        FOREIGN KEY (id_orden) REFERENCES PRODUCCION_ORDENES(id_orden) ON DELETE CASCADE,
+        INDEX idx_orden (id_orden)
+    )
+    """,
 
-    #============================================================
-    #15. ANALISIS_FALTANTES (Detalle de faltantes del análisis)
-    #============================================================
-        """
-        CREATE TABLE IF NOT EXISTS ANALISIS_FALTANTES (
-            id_faltante INT AUTO_INCREMENT PRIMARY KEY,
-            id_analisis INT NOT NULL,
-            id_ingrediente INT NULL,
-            id_activo INT NULL,
-            necesario DECIMAL(10,2) NOT NULL,
-            disponible DECIMAL(10,2) NOT NULL,
-            faltante DECIMAL(10,2) NOT NULL,
-            FOREIGN KEY (id_analisis) REFERENCES PRODUCCION_ANALISIS(id_analisis) ON DELETE CASCADE,
-            FOREIGN KEY (id_ingrediente) REFERENCES INGREDIENTES(id_ingrediente) ON DELETE SET NULL,
-            FOREIGN KEY (id_activo) REFERENCES ACTIVOS(id_activo) ON DELETE SET NULL,
-            INDEX idx_analisis (id_analisis)
-        )
-        """,
-
-    #============================================================
-    #16. PRODUCCION_HISTORIAL_ESTADOS (Bitácora de cambios de estado)
-    #============================================================
-        """
-        CREATE TABLE IF NOT EXISTS PRODUCCION_HISTORIAL_ESTADOS (
-            id_historial INT AUTO_INCREMENT PRIMARY KEY,
-            id_orden INT NOT NULL,
-            estado_anterior ENUM('pendiente', 'en_proceso', 'finalizada', 'cancelada') NOT NULL,
-            estado_nuevo ENUM('pendiente', 'en_proceso', 'finalizada', 'cancelada') NOT NULL,
-            fecha_cambio DATETIME DEFAULT CURRENT_TIMESTAMP,
-            usuario VARCHAR(100),
-            observaciones TEXT,
-            FOREIGN KEY (id_orden) REFERENCES PRODUCCION_ORDENES(id_orden) ON DELETE CASCADE,
-            INDEX idx_orden (id_orden)
-        )
-        """,
-
-    # NOTA: los ajustes a PRODUCTOS y PRODUCTO_PRESENTACIONES (eliminar
-    # columnas redundantes, agregar mano_obra_valor/tipo, agregar
-    # diametro/peso/id_receta/costo/estado, y la FK de id_receta) ya NO
-    # viven aquí como ALTER TABLE en texto plano, porque "DROP COLUMN
-    # IF EXISTS" combinado y "ADD FOREIGN KEY IF NOT EXISTS" no son
-    # sintaxis válida en MySQL/MariaDB y rompían la migración.
-    # Esa lógica ahora está en migrator.py, como código Python que
-    # verifica en INFORMATION_SCHEMA si cada columna/llave ya existe
-    # antes de tocarla. Ver _aplicar_migraciones_manuales().
-
-   # ============================================================
+    # ============================================================
     # 9. VENTAS (reescrita)
     # ============================================================
     """
@@ -449,7 +416,6 @@ SCHEMA_OPERACIONES = [
         INDEX idx_cliente (cliente_cedula)
     )
     """,
-
     # ============================================================
     # 9B. VENTA_PAGOS (pagos mixtos: efectivo + pago móvil, etc.)
     # ============================================================
@@ -462,6 +428,44 @@ SCHEMA_OPERACIONES = [
         referencia VARCHAR(50),
         FOREIGN KEY (id_venta) REFERENCES VENTAS(id_venta) ON DELETE CASCADE,
         INDEX idx_venta (id_venta)
+    )
+    """,
+
+    # ============================================================
+    # ----- CUENTAS_POR_COBRAR y ABONOS_CUENTA (después de VENTAS y VENTA_PAGOS) -----
+    # ============================================================
+    """
+    CREATE TABLE IF NOT EXISTS CUENTAS_POR_COBRAR (
+        id_cuenta INT AUTO_INCREMENT PRIMARY KEY,
+        id_venta INT NOT NULL,
+        id_cliente INT NULL,
+        monto_total DECIMAL(10,2) NOT NULL,
+        monto_abonado DECIMAL(10,2) NOT NULL DEFAULT 0,
+        monto_pendiente DECIMAL(10,2) NOT NULL,
+        estado ENUM('pendiente','parcial','pagada','anulada') NOT NULL DEFAULT 'pendiente',
+        fecha_venta DATETIME NOT NULL,
+        fecha_vencimiento DATE NULL,
+        observaciones TEXT,
+        fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (id_venta) REFERENCES VENTAS(id_venta) ON DELETE CASCADE,
+        FOREIGN KEY (id_cliente) REFERENCES CLIENTES(id_cliente) ON DELETE SET NULL,
+        INDEX idx_estado (estado),
+        INDEX idx_cliente (id_cliente),
+        INDEX idx_venta (id_venta)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS ABONOS_CUENTA (
+        id_abono INT AUTO_INCREMENT PRIMARY KEY,
+        id_cuenta INT NOT NULL,
+        monto DECIMAL(10,2) NOT NULL,
+        metodo_pago ENUM('efectivo','debito','transferencia','pago_movil') NOT NULL,
+        referencia VARCHAR(50),
+        observaciones TEXT,
+        usuario_registro VARCHAR(100),
+        fecha_abono DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (id_cuenta) REFERENCES CUENTAS_POR_COBRAR(id_cuenta) ON DELETE CASCADE,
+        INDEX idx_cuenta (id_cuenta)
     )
     """,
 
@@ -486,7 +490,6 @@ SCHEMA_OPERACIONES = [
         INDEX idx_nombre_producto (nombre_producto)
     )
     """,
-
     # ============================================================
     # 10B. VENTA_CONSUMO_PRODUCCION (de qué lote(s) salió cada línea, estilo PEPS)
     # ============================================================
@@ -501,9 +504,8 @@ SCHEMA_OPERACIONES = [
         INDEX idx_detalle_venta (id_detalle_venta)
     )
     """,
-
     # ============================================================
-    # 10C. DETALLE_VENTA_AGREGADOS (toppers/velas personalizadas añadidos en la venta)
+    # 10C. DETALLE_VENTA_AGREGADOS (toppers/velas personalizadas añadidas en la venta)
     # ============================================================
     """
     CREATE TABLE IF NOT EXISTS DETALLE_VENTA_AGREGADOS (
@@ -585,7 +587,6 @@ SCHEMA_OPERACIONES = [
         INDEX idx_nombre (nombre)
     )
     """,
-
     # ============================================================
     # 17. PARAMETROS_NEGOCIO (Mano de obra y base de prorrateo)
     # ============================================================
@@ -597,5 +598,4 @@ SCHEMA_OPERACIONES = [
         fecha_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP
     )
     """,
-
 ]
