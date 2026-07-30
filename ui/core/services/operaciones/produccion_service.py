@@ -85,7 +85,11 @@ class ProduccionService(CRUDService):
             return ServiceResult.error("La orden no existe.")
         if orden["estado"] != "pendiente":
             return ServiceResult.error("Solo se pueden actualizar órdenes pendientes.")
-        if self.repo.actualizar_orden(identificador, datos):
+        # actualizar_orden hace UPDATE de todas las columnas, así que hay
+        # que fusionar con la orden actual: si no se fusiona, un campo
+        # ausente en 'datos' se guardaría como NULL en vez de conservarse.
+        datos_completos = {**orden, **datos}
+        if self.repo.actualizar_orden(identificador, datos_completos):
             return ServiceResult.ok("Orden actualizada.")
         return ServiceResult.error("Error al actualizar.")
 
@@ -149,6 +153,8 @@ class ProduccionService(CRUDService):
                 "id_producto": det["id_producto"],
                 "id_presentacion": det.get("id_presentacion"),
                 "cantidad_planificada": det["cantidad"],
+                "peso_objetivo": det.get("peso_objetivo"),
+                "unidad_objetivo": det.get("unidad_objetivo"),
                 "modificaciones": det.get("modificaciones", ""),
             })
 
@@ -177,27 +183,36 @@ class ProduccionService(CRUDService):
         requerimientos_por_detalle = []
         for detalle in detalles:
             resultado_req = self._resolver_requerimientos_producto(
-                detalle["id_producto"], detalle["cantidad_planificada"]
+                detalle["id_producto"],
+                detalle["cantidad_planificada"],
+                peso_objetivo=detalle.get("peso_objetivo"),
+                unidad_objetivo=detalle.get("unidad_objetivo"),
             )
             if resultado_req.fallo:
                 return ServiceResult.error(f"No se puede iniciar: {resultado_req.mensaje}")
-            req = resultado_req.datos
+            requerimientos_por_detalle.append((detalle, resultado_req.datos))
 
-            for ing in req["ingredientes"]:
-                disp = self._ingrediente_service.verificar_disponibilidad(ing["id_ingrediente"], ing["cantidad"])
-                if disp.fallo or not disp.datos["suficiente"]:
-                    return ServiceResult.error(
-                        f"Stock insuficiente de '{ing['nombre']}' para fabricar '{req['nombre_producto']}'."
-                    )
-            for emp in req["empaques"]:
-                activo = self._activo_service.obtener(emp["id_activo"])
-                disponible = float(activo.get("stock_actual", 0)) if activo else 0.0
-                if disponible < emp["cantidad"]:
-                    return ServiceResult.error(
-                        f"Stock insuficiente de '{emp['nombre']}' para fabricar '{req['nombre_producto']}'."
-                    )
+        # La verificación se hace agregando ingredientes/empaques de TODA
+        # la orden, no producto por producto: si dos productos de la misma
+        # orden usan el mismo ingrediente, cada uno comparado por separado
+        # contra el stock total puede "pasar" aunque juntos no alcancen.
+        ingredientes_totales, empaques_totales = self._agregar_requerimientos(
+            [req for _, req in requerimientos_por_detalle]
+        )
 
-            requerimientos_por_detalle.append((detalle, req))
+        for id_ingrediente, datos_ing in ingredientes_totales.items():
+            disp = self._ingrediente_service.verificar_disponibilidad(id_ingrediente, datos_ing["cantidad"])
+            if disp.fallo or not disp.datos["suficiente"]:
+                return ServiceResult.error(
+                    f"Stock insuficiente de '{datos_ing['nombre']}' para fabricar toda la orden."
+                )
+        for id_activo, datos_emp in empaques_totales.items():
+            activo = self._activo_service.obtener(id_activo)
+            disponible = float(activo.get("stock_actual", 0)) if activo else 0.0
+            if disponible < datos_emp["cantidad"]:
+                return ServiceResult.error(
+                    f"Stock insuficiente de '{datos_emp['nombre']}' para fabricar toda la orden."
+                )
 
         # 2) Descuento real + bitácora en PRODUCCION_INGREDIENTES_RESERVADOS /
         #    PRODUCCION_ACTIVOS_RESERVADOS (necesaria para poder devolver el
@@ -264,12 +279,9 @@ class ProduccionService(CRUDService):
                 "disponible_venta": datos_detalle.get("disponible_venta", True),
             })
 
-        # Mermas (y, si son recuperables, el subproducto que generaron).
-        # El subproducto se registra colgado del mismo id_merma -- es solo
-        # bitácora: no existe todavía una tabla de "stock de subproductos"
-        # que se pueda descontar en otra producción; si más adelante querés
-        # que un subproducto se pueda usar como componente real de otra
-        # receta/producto, eso es una función aparte.
+        # Registro de mermas y, si son recuperables, del subproducto que
+        # generaron (solo bitácora: no hay todavía stock de subproductos
+        # reutilizable en otra producción).
         for merma in datos_finalizacion.get("mermas", []):
             id_merma = self.repo.crear_merma({
                 "id_orden": id_orden,
@@ -292,8 +304,18 @@ class ProduccionService(CRUDService):
                     "unidad": subproducto.get("unidad", ""),
                 })
 
+        fecha_fin = datetime.now()
+        costo_real = sum(
+            float(d.get("costo_calculado", 0)) for d in datos_finalizacion.get("detalles", {}).values()
+        )
+        tiempo_real = 0
+        if orden.get("fecha_inicio"):
+            tiempo_real = int((fecha_fin - orden["fecha_inicio"]).total_seconds() / 60)
+
         datos_orden = dict(orden)
-        datos_orden["fecha_fin"] = datetime.now()
+        datos_orden["fecha_fin"] = fecha_fin
+        datos_orden["costo_real"] = costo_real
+        datos_orden["tiempo_real_minutos"] = tiempo_real
         self.repo.actualizar_orden(id_orden, datos_orden)
         self.repo.actualizar_estado_orden(id_orden, "finalizada")
         return ServiceResult.ok("Orden finalizada exitosamente.")
@@ -332,11 +354,23 @@ class ProduccionService(CRUDService):
         costo_estimado = 0.0
         tiempo_estimado = 0.0
 
+        # Stock restante compartido entre los productos de esta orden: si
+        # dos productos piden el mismo ingrediente, lo que "consume" el
+        # primero en este análisis reduce lo que le queda disponible al
+        # segundo. Se inicializa la primera vez que se ve cada id.
+        restante_ingredientes: Dict[int, float] = {}
+        restante_empaques: Dict[int, float] = {}
+
         for det in detalles:
             id_producto = det["id_producto"]
             cantidad_solicitada = det["cantidad"]
 
-            resultado_req = self._resolver_requerimientos_producto(id_producto, cantidad_solicitada)
+            resultado_req = self._resolver_requerimientos_producto(
+                id_producto,
+                cantidad_solicitada,
+                peso_objetivo=det.get("peso_objetivo"),
+                unidad_objetivo=det.get("unidad_objetivo"),
+            )
             if resultado_req.fallo:
                 resultados.append({
                     "id_producto": id_producto,
@@ -361,26 +395,32 @@ class ProduccionService(CRUDService):
             proporcion_minima = 1.0  # menor proporción disponible entre todos los insumos
 
             for ing in req["ingredientes"]:
-                disp = self._ingrediente_service.verificar_disponibilidad(ing["id_ingrediente"], ing["cantidad"])
-                if disp.fallo:
-                    faltantes.append({"tipo": "ingrediente", "nombre": ing["nombre"], "necesario": ing["cantidad"], "disponible": 0, "faltante": ing["cantidad"]})
-                    proporcion_minima = 0
-                    continue
-                info = disp.datos
-                if not info["suficiente"]:
+                id_ing = ing["id_ingrediente"]
+                if id_ing not in restante_ingredientes:
+                    disp = self._ingrediente_service.verificar_disponibilidad(id_ing, ing["cantidad"])
+                    restante_ingredientes[id_ing] = float(disp.datos.get("disponible", 0)) if disp.exito else 0.0
+                disponible = restante_ingredientes[id_ing]
+
+                if disponible < ing["cantidad"]:
                     faltantes.append({
                         "tipo": "ingrediente",
                         "nombre": ing["nombre"],
                         "necesario": ing["cantidad"],
-                        "disponible": info["disponible"],
-                        "faltante": info["faltante"],
+                        "disponible": disponible,
+                        "faltante": ing["cantidad"] - disponible,
                     })
                     if ing["cantidad"] > 0:
-                        proporcion_minima = min(proporcion_minima, info["disponible"] / ing["cantidad"])
+                        proporcion_minima = min(proporcion_minima, disponible / ing["cantidad"])
+
+                restante_ingredientes[id_ing] = max(0.0, disponible - ing["cantidad"])
 
             for emp in req["empaques"]:
-                activo = self._activo_service.obtener(emp["id_activo"])
-                disponible = float(activo.get("stock_actual", 0)) if activo else 0.0
+                id_act = emp["id_activo"]
+                if id_act not in restante_empaques:
+                    activo = self._activo_service.obtener(id_act)
+                    restante_empaques[id_act] = float(activo.get("stock_actual", 0)) if activo else 0.0
+                disponible = restante_empaques[id_act]
+
                 if disponible < emp["cantidad"]:
                     faltantes.append({
                         "tipo": "empaque",
@@ -391,6 +431,8 @@ class ProduccionService(CRUDService):
                     })
                     if emp["cantidad"] > 0:
                         proporcion_minima = min(proporcion_minima, disponible / emp["cantidad"])
+
+                restante_empaques[id_act] = max(0.0, disponible - emp["cantidad"])
 
             if not faltantes:
                 cantidad_posible = cantidad_solicitada
@@ -423,16 +465,38 @@ class ProduccionService(CRUDService):
     # HELPERS PRIVADOS
     # =========================================================
 
-    def _resolver_requerimientos_producto(self, id_producto: int, cantidad: float) -> ServiceResult:
+    def _resolver_requerimientos_producto(
+        self,
+        id_producto: int,
+        cantidad: float,
+        peso_objetivo: Optional[float] = None,
+        unidad_objetivo: Optional[str] = None,
+    ) -> ServiceResult:
         """
         Dado un producto y una cantidad a fabricar, devuelve qué
         ingredientes y qué empaques hacen falta, ya escalados a esa
         cantidad.
 
         - tipo 'individual': usa la receta vinculada. Si la receta rinde en
-          'unidad', escala directo. Si rinde en masa/volumen (ej. "2000 g"),
-          convierte usando el peso/unidad_peso del producto para saber
-          cuántas unidades salen de una tanda completa de la receta.
+          'unidad' (ej. "rinde 15 donas"), escala directo con
+          rendimiento_cantidad -- no hace falta ningún peso, es coherente
+          tal cual. Si rinde en masa/volumen (ej. "2000 g", "1.22 kg"),
+          hace falta saber qué tamaño se quiere producir realmente:
+
+            - Si la orden trae 'peso_objetivo' (lo que el usuario eligió
+              en el Paso 1 del wizard de producción para ESTE detalle,
+              ej. "quiero una torta de 2 kg"), se usa ese valor.
+            - Si no, se cae al 'peso'/'unidad_peso' fijos del producto
+              (PRODUCTOS.peso) como compatibilidad, aunque ese campo hoy
+              no es editable desde ningún formulario y normalmente se
+              queda en el default de 1.0 kg -- por eso conviene que la
+              orden siempre traiga 'peso_objetivo' explícito.
+
+          ❌ Bug anterior: siempre usaba producto.peso, que nunca se podía
+          editar en ningún formulario (quedaba fijo en el default del
+          esquema). Pedir "2" en la cantidad de una torta se interpretaba
+          como "2 tortas de 1 kg" en vez de "1 torta de 2 kg", e inflaba
+          el descuento de todos los ingredientes de la receta.
         - tipo 'elaborado': usa PRODUCTO_COMPONENTES directo (cada
           componente ya define cuánto hace falta por 1 unidad de producto).
         - tipo 'combo': no se fabrica en Producción (agrupa productos ya
@@ -468,14 +532,28 @@ class ProduccionService(CRUDService):
             rendimiento_unidad = (receta.get("rendimiento_unidad") or "unidad").strip().lower()
 
             if rendimiento_unidad == "unidad":
+                # La receta ya rinde en unidades contables (ej. "15 donas"):
+                # no hay nada que preguntar, esto ya es coherente tal cual.
                 unidades_por_receta = rendimiento_cantidad
             else:
-                peso_producto = float(producto.get("peso") or 0)
-                unidad_peso_producto = producto.get("unidad_peso") or ""
+                # La receta rinde en masa/volumen (ej. "1.22 kg"): hace
+                # falta saber qué tamaño se quiere producir. Prioridad:
+                # 1) lo que el usuario eligió para ESTE detalle de la
+                #    orden (peso_objetivo/unidad_objetivo), 2) el peso
+                #    fijo del producto como último recurso.
+                if peso_objetivo:
+                    peso_producto = float(peso_objetivo)
+                    unidad_peso_producto = unidad_objetivo or rendimiento_unidad
+                else:
+                    peso_producto = float(producto.get("peso") or 0)
+                    unidad_peso_producto = producto.get("unidad_peso") or ""
+
                 if not peso_producto:
                     return ServiceResult.error(
-                        f"'{nombre_producto}' no tiene definido su peso/volumen, necesario porque "
-                        f"su receta rinde en '{rendimiento_unidad}' y no en unidades."
+                        f"Falta indicar el peso/volumen a producir de '{nombre_producto}': "
+                        f"su receta rinde en '{rendimiento_unidad}' y no en unidades, así que "
+                        f"no se puede saber cuántas 'unidades de producto' salen de una tanda "
+                        f"sin ese dato."
                     )
                 try:
                     rendimiento_en_unidad_producto = self._recetas_service.convertir_unidad(
@@ -544,6 +622,26 @@ class ProduccionService(CRUDService):
             "tiempo_unitario": float(producto.get("tiempo_preparacion_minutos") or 0),
         })
 
+    def _agregar_requerimientos(self, requerimientos_por_producto: List[Dict]) -> tuple[Dict[int, Dict], Dict[int, Dict]]:
+        """Suma ingredientes y empaques de varios productos, agrupados por
+        id, para poder verificar el stock total de la orden de una vez."""
+        ingredientes_totales: Dict[int, Dict] = {}
+        empaques_totales: Dict[int, Dict] = {}
+
+        for req in requerimientos_por_producto:
+            for ing in req["ingredientes"]:
+                acumulado = ingredientes_totales.setdefault(
+                    ing["id_ingrediente"], {"nombre": ing["nombre"], "cantidad": 0.0}
+                )
+                acumulado["cantidad"] += ing["cantidad"]
+            for emp in req["empaques"]:
+                acumulado = empaques_totales.setdefault(
+                    emp["id_activo"], {"nombre": emp["nombre"], "cantidad": 0.0}
+                )
+                acumulado["cantidad"] += emp["cantidad"]
+
+        return ingredientes_totales, empaques_totales
+
     def _devolver_inventario_orden(self, id_orden: int) -> None:
         """Repone a inventario todo lo que se descontó al iniciar la orden
         (usado al cancelar una orden 'en_proceso')."""
@@ -552,6 +650,7 @@ class ProduccionService(CRUDService):
                 cantidad = float(reserva.get("cantidad_consumida", 0))
                 if cantidad > 0 and reserva.get("id_lote"):
                     self._ingrediente_service.devolver_stock(reserva["id_lote"], cantidad)
+                    self.repo.marcar_reserva_ingrediente_devuelta(reserva["id_reserva"], cantidad)
 
         if self._activo_service:
             for reserva in self.repo.listar_reservas_activos_por_orden(id_orden):

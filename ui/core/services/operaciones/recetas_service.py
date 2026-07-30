@@ -629,19 +629,54 @@ class RecetasService(CRUDService):
     # ==========================================================
 
     def verificar_stock(self, ingredientes: List[Dict]) -> ServiceResult:
+        """
+        ❌ Bug anterior (doble): 'todos = self.repo_ingredientes.listar()'
+        devuelve una fila POR LOTE (no por ingrediente), así que el
+        diccionario 'cache = {i["id_ingrediente"]: i for i in todos}' se
+        pisaba a sí mismo cuando un ingrediente tenía varios lotes -- solo
+        quedaba el stock_actual de UN lote, no la suma real disponible.
+        Además comparaba 'item["cantidad"]' (en la unidad de la receta,
+        ej. kg) directo contra 'stock_actual' (que ya vive en la unidad
+        base del ingrediente, ej. g) sin convertir.
+
+        ✅ Ahora: 'cache' solo se usa para datos que NO cambian entre
+        lotes (nombre_ingrediente, unidad_medida); el stock real se pide
+        con obtener_stock(), que sí suma todos los lotes vigentes. La
+        cantidad de la receta se convierte a la unidad_medida del
+        ingrediente antes de comparar, igual que ya hace calcular_subtotal().
+        """
         consolidado = self.consolidar_ingredientes(ingredientes)
         todos = self.repo_ingredientes.listar()
         cache = {i["id_ingrediente"]: i for i in todos}
         faltantes = []
         for item in consolidado:
-            bd = cache.get(item["id_ingrediente"])
-            if bd:
-                stock = float(bd.get("stock_actual", 0))
-                solicitado = float(item["cantidad"])
-                if solicitado > stock:
-                    faltantes.append({
-                        "ingrediente": bd["nombre_ingrediente"],
-                        "stock": stock,
-                        "solicitado": solicitado,
-                    })
+            id_ingrediente = item["id_ingrediente"]
+            bd = cache.get(id_ingrediente)
+            if not bd:
+                continue
+
+            nombre = bd.get("nombre_ingrediente", f"id {id_ingrediente}")
+            unidad_medida = bd.get("unidad_medida", "")
+
+            try:
+                cantidad_necesaria = self.convertir_unidad(
+                    float(item["cantidad"]), item["unidad"], unidad_medida
+                )
+            except ValueError as e:
+                # Unidad incompatible: no se puede comparar con el stock,
+                # se informa como falta en vez de comparar números que no
+                # significan lo mismo.
+                faltantes.append({
+                    "ingrediente": nombre,
+                    "error": str(e),
+                })
+                continue
+
+            stock = self.repo_ingredientes.obtener_stock(id_ingrediente)
+            if cantidad_necesaria > stock:
+                faltantes.append({
+                    "ingrediente": nombre,
+                    "stock": stock,
+                    "solicitado": cantidad_necesaria,
+                })
         return ServiceResult.ok(datos=faltantes)

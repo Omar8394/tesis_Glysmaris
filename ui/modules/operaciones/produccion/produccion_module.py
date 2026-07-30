@@ -97,8 +97,8 @@ class ProduccionModule(Module):
             spacing=0,
         )
 
-        # ❌ NO LLAMAR a cargar() aquí
-        # self.cargar()  # <-- ELIMINAR
+        # La carga inicial se dispara en on_show(), no acá: cuando se
+        # construye el módulo, la vista todavía no está adjunta a la página.
 
     def construir(self) -> ft.Control:
         return self.view
@@ -128,10 +128,9 @@ class ProduccionModule(Module):
             on_ver_detalle=self._ver_detalle,
             on_cancelar=self._cancelar_orden,
         )
-        # ✅ chequear que el CONTROL ya esté adjunto a la página (no que
-        # exista self.page), porque en la primera navegación a este módulo
-        # on_show()/cargar() corren antes de que module_registry.mostrar()
-        # devuelva la vista y el caller la agregue a la página.
+        # Se chequea que el control ya esté adjunto a la página, porque en
+        # la primera navegación cargar() corre antes de que la vista quede
+        # agregada a la página.
         if self.panel_estados.page:
             self.panel_estados.update()
 
@@ -159,27 +158,41 @@ class ProduccionModule(Module):
         self._ver_detalle(id_orden)
 
     def _finalizar_orden(self, id_orden):
-        merma_dialog = MermaDialog(
-            page=self.page,
-            id_orden=id_orden,
-            on_guardar=lambda datos: self._confirmar_finalizacion(id_orden, datos),
-        )
-        merma_dialog.abrir()
-
-    def _confirmar_finalizacion(self, id_orden, datos_merma):
         orden_completa = self.servicio.obtener(id_orden)
         if not orden_completa:
             MensajeSistema.error(self.page, "Orden no encontrada.")
             return
 
-        datos_fin = {
-            "detalles": {},
-            "mermas": [datos_merma] if datos_merma else [],
-        }
+        merma_dialog = MermaDialog(
+            page=self.page,
+            id_orden=id_orden,
+            detalles=orden_completa.get("detalles", []),
+            on_guardar=lambda mermas: self._confirmar_finalizacion(id_orden, mermas),
+        )
+        merma_dialog.abrir()
+
+    def _confirmar_finalizacion(self, id_orden, mermas):
+        orden_completa = self.servicio.obtener(id_orden)
+        if not orden_completa:
+            MensajeSistema.error(self.page, "Orden no encontrada.")
+            return
+
+        # La merma registrada para un detalle se resta de lo planificado
+        # para obtener la cantidad realmente lograda; si no se le asoció
+        # producto (merma general), no afecta el rendimiento de ninguno.
+        merma_por_detalle: dict = {}
+        for m in mermas:
+            id_detalle = m.get("id_detalle")
+            if id_detalle is not None:
+                merma_por_detalle[id_detalle] = merma_por_detalle.get(id_detalle, 0) + float(m.get("cantidad", 0))
+
+        datos_fin = {"detalles": {}, "mermas": mermas}
 
         for det in orden_completa.get("detalles", []):
+            merma_detalle = merma_por_detalle.get(det["id_detalle"], 0)
+            cantidad_obtenida = max(0, det["cantidad_planificada"] - merma_detalle)
             datos_fin["detalles"][str(det["id_detalle"])] = {
-                "cantidad_obtenida": det["cantidad_planificada"],
+                "cantidad_obtenida": cantidad_obtenida,
                 "precio_final": det.get("precio_final", 0),
                 "costo_calculado": det.get("costo_calculado", 0),
                 "disponible_venta": True,
@@ -227,7 +240,7 @@ class ProduccionModule(Module):
             width=500,
         )
 
-        self._dialogo = Dialogo.personalizado(      # <-- guardar la referencia
+        self._dialogo = Dialogo.personalizado(
             page=self.page,
             titulo="Detalle de orden",
             contenido=contenido,
@@ -278,12 +291,8 @@ class ProduccionModule(Module):
             self._dialogo = None
 
     def _crear_orden_desde_wizard(self, datos):
-        # El wizard (ProduccionWizard._guardar) ya llamó a
-        # produccion_service.crear_orden() y solo invoca este callback si
-        # salió bien. 'datos' acá ES el resultado ya creado
-        # ({"orden": {...}, "detalles": [...]}), no hay que reenviarlo a
-        # crear_orden() -- eso duplicaba el intento de creación y fallaba
-        # la validación por la forma distinta del dict.
+        # El wizard ya creó la orden vía produccion_service.crear_orden();
+        # 'datos' es el resultado ya creado, no hay que reenviarlo a crear_orden().
         orden = datos.get("orden", {}) or {}
         MensajeSistema.exito(
             self.page,

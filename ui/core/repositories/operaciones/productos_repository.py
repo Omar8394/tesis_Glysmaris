@@ -36,6 +36,8 @@ class ProductoRepository(CRUDRepository):
         p.categoria,
         p.receta_id,
         r.nombre_receta,
+        r.rendimiento_cantidad,
+        r.rendimiento_unidad,
         p.descripcion_producto AS descripcion,
         p.peso,
         p.unidad_peso,
@@ -46,6 +48,7 @@ class ProductoRepository(CRUDRepository):
         p.costos_indirectos AS costos_indirectos_total,
         p.costo_total,
         p.margen_porcentaje,
+        p.precio_sugerido,
         p.precio_final,
         p.precio_combo,
         p.descuento_combo,
@@ -64,8 +67,9 @@ class ProductoRepository(CRUDRepository):
             INSERT INTO PRODUCTOS
             (nombre_producto, tipo_producto, categoria, receta_id, descripcion_producto,
              costo_receta, mano_obra, empaques, costos_indirectos,
-             costo_total, margen_porcentaje, precio_final, precio_combo, descuento_combo, activo)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE)
+             costo_total, margen_porcentaje, precio_sugerido, precio_final,
+             precio_combo, descuento_combo, activo)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE)
         """
         cursor = self._cursor()
         cursor.execute(query, self._valores_principales(datos))
@@ -80,7 +84,7 @@ class ProductoRepository(CRUDRepository):
             SET nombre_producto=%s, tipo_producto=%s, categoria=%s, receta_id=%s,
                 descripcion_producto=%s, costo_receta=%s, mano_obra=%s,
                 empaques=%s, costos_indirectos=%s,
-                costo_total=%s, margen_porcentaje=%s, precio_final=%s,
+                costo_total=%s, margen_porcentaje=%s, precio_sugerido=%s, precio_final=%s,
                 precio_combo=%s, descuento_combo=%s
             WHERE id_producto=%s
         """
@@ -110,6 +114,7 @@ class ProductoRepository(CRUDRepository):
             datos.get("costos_indirectos_total", 0),
             datos.get("costo_total", 0),
             datos.get("margen_porcentaje", 40),
+            datos.get("precio_sugerido", 0),
             datos.get("precio_final", 0),
             datos.get("precio_combo") if tipo == "combo" else None,
             datos.get("descuento_combo", 0) if tipo == "combo" else 0,
@@ -153,8 +158,18 @@ class ProductoRepository(CRUDRepository):
         cursor = self._cursor()
         for p in presentaciones:
             cursor.execute(
-                "INSERT INTO PRODUCTO_PRESENTACIONES (id_producto, nombre, precio) VALUES (%s, %s, %s)",
-                (id_producto, p["nombre"], p.get("precio", 0)),
+                """
+                INSERT INTO PRODUCTO_PRESENTACIONES
+                    (id_producto, nombre, precio, diametro_cm, cantidad_trozos)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (
+                    id_producto,
+                    p["nombre"],
+                    p.get("precio", 0),
+                    p.get("diametro_cm"),
+                    p.get("cantidad_trozos"),
+                ),
             )
 
     def _guardar_componentes(self, id_producto: int, componentes: List[Dict]):
@@ -257,7 +272,8 @@ class ProductoRepository(CRUDRepository):
     def _obtener_presentaciones(self, id_producto: int) -> List[Dict]:
         cursor = self._cursor()
         cursor.execute(
-            "SELECT nombre, precio FROM PRODUCTO_PRESENTACIONES WHERE id_producto=%s",
+            "SELECT nombre, precio, diametro_cm, cantidad_trozos "
+            "FROM PRODUCTO_PRESENTACIONES WHERE id_producto=%s",
             (id_producto,),
         )
         return cursor.fetchall()
@@ -314,12 +330,32 @@ class ProductoRepository(CRUDRepository):
     # ============================================================
 
     def eliminar(self, identificador: int) -> bool:
-        # Desactivar en lugar de eliminar
         query = "UPDATE PRODUCTOS SET activo = FALSE WHERE id_producto = %s"
         cursor = self._cursor()
         cursor.execute(query, (identificador,))
         self._commit()
         return cursor.rowcount > 0
+
+    def alternar_activo(self, identificador: int) -> Optional[bool]:
+        """
+        Invierte el estado activo/inactivo del producto y devuelve el
+        estado nuevo (True/False), o None si el producto no existe.
+        Reversible -- a diferencia de eliminar(), que siempre deja el
+        producto en FALSE.
+        """
+        cursor = self._cursor()
+        cursor.execute("SELECT activo FROM PRODUCTOS WHERE id_producto = %s", (identificador,))
+        fila = cursor.fetchone()
+        if not fila:
+            return None
+
+        nuevo_estado = not bool(fila["activo"])
+        cursor.execute(
+            "UPDATE PRODUCTOS SET activo = %s WHERE id_producto = %s",
+            (nuevo_estado, identificador),
+        )
+        self._commit()
+        return nuevo_estado
 
     def buscar(self, texto: str) -> List[Dict]:
         return self.listar(texto)

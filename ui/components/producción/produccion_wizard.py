@@ -130,8 +130,8 @@ class ProduccionWizard(ft.Container):
             width=750,
         )
 
-        # ❌ NO llamar a update() aquí
-        # self._actualizar_botones()  # <-- ELIMINADO
+        # No se llama a update() acá: el contenedor todavía no está
+        # adjunto a la página cuando se construye el wizard.
 
     # =========================================================
     #  CONSTRUCCIÓN DE PASOS
@@ -155,6 +155,20 @@ class ProduccionWizard(ft.Container):
             value="1",
         )
 
+        # ✅ Solo se muestra cuando la receta del producto seleccionado
+        # rinde en masa/volumen (ej. "1.22 kg"), no cuando rinde en
+        # "unidad" (ej. "15 donas") -- en ese caso no hace falta pedir
+        # nada, ya es coherente con rendimiento_cantidad tal cual.
+        # Antes no existía ningún campo para esto y el sistema asumía
+        # el peso fijo (nunca editable) del producto, lo que inflaba o
+        # reducía el descuento de ingredientes sin que el usuario lo supiera.
+        self.peso_input = CampoTexto(
+            etiqueta="Peso/volumen a producir",
+            width=180,
+            keyboard_type=ft.KeyboardType.NUMBER,
+            hint="Solo si el producto se mide por peso/volumen (ej. tortas)",
+        )
+
         self.btn_agregar = BotonPrimario(
             texto="Agregar",
             icono=AppIcons.ADD,
@@ -172,7 +186,7 @@ class ProduccionWizard(ft.Container):
                     weight="bold",
                 ),
                 ft.Row(
-                    [self.buscador_productos, self.cantidad_input, self.btn_agregar],
+                    [self.buscador_productos, self.cantidad_input, self.peso_input, self.btn_agregar],
                     spacing=AppSpacing.CONTROL_SPACING,
                 ),
                 self.resultados_busqueda,
@@ -371,6 +385,23 @@ class ProduccionWizard(ft.Container):
         if self.page:
             self.update()
 
+    # Unidades de conteo -- si la receta rinde en alguna de estas, ya es
+    # coherente con rendimiento_cantidad tal cual (ej. "rinde 15 donas")
+    # y no hace falta pedir peso/volumen objetivo. Cualquier otra unidad
+    # (kg, g, ml, l, etc.) sí lo necesita. Mismo criterio que la categoría
+    # "conteo" de UNIDADES_CANONICAS en recetas_service.py.
+    _UNIDADES_CONTEO = {"unidad", "unidades", "u", "docena", "docenas"}
+
+    def _requiere_peso(self, producto: Dict) -> bool:
+        if producto.get("tipo") != "individual":
+            # "elaborado"/"combo" no escalan por rendimiento de receta,
+            # cada componente ya define su cantidad por unidad de producto.
+            return False
+        rendimiento_unidad = (producto.get("rendimiento_unidad") or "").strip().lower()
+        if not rendimiento_unidad:
+            return False
+        return rendimiento_unidad not in self._UNIDADES_CONTEO
+
     def _seleccionar_producto(self, producto: Dict):
         for p in self.productos_seleccionados:
             if p["id_producto"] == producto["id_producto"]:
@@ -378,11 +409,34 @@ class ProduccionWizard(ft.Container):
                 return
 
         try:
-            cantidad = float(self.cantidad_input.value or 1)
+            cantidad = int(float(self.cantidad_input.value or 1))
         except ValueError:
             cantidad = 1
         if cantidad <= 0:
             cantidad = 1
+
+        peso_objetivo = None
+        unidad_objetivo = None
+        if self._requiere_peso(producto):
+            texto_peso = (self.peso_input.value or "").strip()
+            if not texto_peso:
+                self._mostrar_error(
+                    f"'{producto['nombre']}' se mide por peso/volumen "
+                    f"({producto.get('rendimiento_unidad')}); indicá cuánto "
+                    f"peso/volumen querés producir por unidad."
+                )
+                return
+            try:
+                peso_objetivo = float(texto_peso)
+            except ValueError:
+                self._mostrar_error("El peso/volumen a producir debe ser un número.")
+                return
+            if peso_objetivo <= 0:
+                self._mostrar_error("El peso/volumen a producir debe ser mayor a 0.")
+                return
+            # Se pide en la misma unidad en la que rinde la receta, para no
+            # necesitar un selector de unidad adicional en este paso.
+            unidad_objetivo = producto.get("rendimiento_unidad")
 
         self.productos_seleccionados.append({
             "id_producto": producto["id_producto"],
@@ -390,11 +444,14 @@ class ProduccionWizard(ft.Container):
             "cantidad": cantidad,
             "id_presentacion": None,
             "precio": producto.get("precio_venta", 0),
+            "peso_objetivo": peso_objetivo,
+            "unidad_objetivo": unidad_objetivo,
         })
         self._refrescar_lista_agregados()
         self.resultados_busqueda.visible = False
         self.buscador_productos.limpiar()
         self.cantidad_input.value = "1"   # reset para el siguiente producto
+        self.peso_input.value = ""
         if self.page:
             self.update()
 
@@ -415,10 +472,16 @@ class ProduccionWizard(ft.Container):
     def _refrescar_lista_agregados(self):
         self.lista_agregados.controls.clear()
         for idx, p in enumerate(self.productos_seleccionados):
+            texto_peso = (
+                f"{p['peso_objetivo']} {p.get('unidad_objetivo') or ''}".strip()
+                if p.get("peso_objetivo")
+                else None
+            )
             fila = ft.Row(
                 [
                     ft.Text(f"{p['nombre']}", expand=True, weight="bold"),
                     ft.Text(f"Cantidad: {p['cantidad']}", width=100),
+                    ft.Text(f"c/u: {texto_peso}" if texto_peso else "", width=120),
                     ft.IconButton(
                         icon=ft.icons.DELETE,
                         icon_color=ft.colors.RED,
@@ -454,6 +517,8 @@ class ProduccionWizard(ft.Container):
                     "id_producto": p["id_producto"],
                     "cantidad": p["cantidad"],
                     "id_presentacion": p.get("id_presentacion"),
+                    "peso_objetivo": p.get("peso_objetivo"),
+                    "unidad_objetivo": p.get("unidad_objetivo"),
                 }
                 for p in self.productos_seleccionados
             ],
@@ -471,16 +536,9 @@ class ProduccionWizard(ft.Container):
             self.update()
 
     def _resolver_parcial(self, id_producto: int, decision: str, cantidad: int):
-        """
-        Aplica la decisión del usuario ante un resultado parcial:
-        - "reducir": ajusta la cantidad solicitada a la cantidad máxima
-          posible calculada por el análisis.
-        - "mantener": deja la cantidad como estaba (la orden queda
-          pendiente igual; si llega más stock antes de iniciarla, se
-          podrá fabricar completa).
-        En ambos casos se re-ejecuta el análisis para reflejar el estado
-        actualizado en pantalla.
-        """
+        """Aplica la decisión ante un resultado parcial: "reducir" ajusta
+        la cantidad al máximo posible, "mantener" la deja igual. Re-ejecuta
+        el análisis para reflejar el cambio."""
         self._decisiones_analisis[id_producto] = decision
 
         if decision == "reducir":
@@ -746,6 +804,8 @@ class ProduccionWizard(ft.Container):
                     "id_producto": p["id_producto"],
                     "cantidad": p["cantidad"],
                     "id_presentacion": p.get("id_presentacion"),
+                    "peso_objetivo": p.get("peso_objetivo"),
+                    "unidad_objetivo": p.get("unidad_objetivo"),
                 }
                 for p in self.productos_seleccionados
             ],

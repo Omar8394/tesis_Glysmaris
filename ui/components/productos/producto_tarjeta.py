@@ -70,8 +70,6 @@ class TarjetaProducto(ft.Container):
 
         self.seleccionado = seleccionado
 
-        #self.on_click = on_click
-
         self.on_editar = on_editar
 
         self.on_duplicar = on_duplicar
@@ -288,7 +286,10 @@ class TarjetaProducto(ft.Container):
 
                     border_radius=AppRadius.CHIP,
 
-                    content=ft.Text(p, size=AppTypography.TINY),
+                    content=ft.Text(
+                    p.get("nombre", "") if isinstance(p, dict) else str(p),
+                    size=AppTypography.TINY,
+                ),
 
                 )
                 for p in presentaciones[:3]
@@ -414,18 +415,8 @@ class TarjetaProducto(ft.Container):
     # --------------------------------------------------
 
     def _accion(self, callback):
-
         if callback:
-
             callback(self.producto)
-
-    # --------------------------------------------------
-
-    def _click(self, e):
-
-        if self.on_click:
-
-            self.on_click(self.producto)
 
 
 def activo_o_true(producto: dict) -> bool:

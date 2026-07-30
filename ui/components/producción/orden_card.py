@@ -138,13 +138,7 @@ class OrdenCard(ft.Card):
                     ],
                     spacing=4,
                 ),
-                # Progreso: proxy honesto en base al tiempo transcurrido
-                # desde fecha_inicio contra tiempo_estimado_minutos de la
-                # orden. No es un avance físico reportado (eso requeriría
-                # que alguien lo cargue a mano), pero es un dato real
-                # derivado de columnas que sí existen -- no un valor
-                # inventado. Si falta fecha_inicio o tiempo_estimado, no
-                # se muestra nada en vez de mostrar un número falso.
+                # Progreso estimado (ver _calcular_progreso); no se muestra si falta el dato base.
                 self._crear_barra_progreso() if estado == "en_proceso" and self._calcular_progreso() is not None else ft.Container(),
                 # Botones de acción según estado
                 self._crear_botones_accion(),
@@ -162,13 +156,9 @@ class OrdenCard(ft.Card):
         return self.orden.get("total_cantidad", 0)
 
     def _calcular_progreso(self) -> int | None:
-        """
-        Progreso estimado = tiempo transcurrido desde fecha_inicio /
-        tiempo_estimado_minutos de la orden, acotado a 0-100. Devuelve
-        None si falta alguno de los dos datos (orden vieja sin
-        fecha_inicio registrada, o sin tiempo estimado) -- en ese caso
-        no se muestra la barra, no se inventa un número.
-        """
+        """Progreso estimado = tiempo transcurrido desde fecha_inicio /
+        tiempo_estimado_minutos, acotado a 0-100. Devuelve None si falta
+        alguno de los dos datos."""
         fecha_inicio = self.orden.get("fecha_inicio")
         tiempo_estimado = self.orden.get("tiempo_estimado_minutos")
 

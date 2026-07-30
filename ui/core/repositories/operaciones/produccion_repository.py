@@ -33,27 +33,21 @@ class ProduccionRepository(CRUDRepository):
     # =========================================================
 
     def crear(self, datos: Dict[str, Any]) -> Any:
-        """Crea una nueva orden (implementación de CRUDRepository)."""
         return self.crear_orden(datos)
 
     def actualizar(self, identificador: Any, datos: Dict[str, Any]) -> bool:
-        """Actualiza una orden existente."""
         return self.actualizar_orden(identificador, datos)
 
     def eliminar(self, identificador: Any) -> bool:
-        """Elimina una orden."""
         return self.eliminar_orden(identificador)
 
     def obtener(self, identificador: Any) -> Optional[Dict]:
-        """Obtiene una orden por su ID."""
         return self.obtener_orden(identificador)
 
     def listar(self) -> List[Dict]:
-        """Lista todas las órdenes."""
         return self.listar_ordenes()
 
     def buscar(self, texto: str) -> List[Dict]:
-        """Busca órdenes por texto."""
         return self.listar_ordenes({"buscar": texto})
 
     # =========================================================
@@ -202,15 +196,22 @@ class ProduccionRepository(CRUDRepository):
             INSERT INTO PRODUCCION_DETALLE
                 (id_orden, id_producto, id_presentacion,
                  cantidad_planificada, cantidad_obtenida,
+                 peso_objetivo, unidad_objetivo,
                  precio_final, modificaciones, costo_calculado,
                  disponible_venta)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             datos["id_orden"],
             datos["id_producto"],
             datos.get("id_presentacion"),
             datos.get("cantidad_planificada", 1),
             datos.get("cantidad_obtenida", 0),
+            # ✅ Peso/volumen real que el usuario quiere producir para este
+            # detalle (ej. "torta de 1.5 kg"). Solo aplica cuando la receta
+            # del producto rinde en masa/volumen; si la receta rinde en
+            # "unidad" (ej. "15 donas"), esto queda en None y no hace falta.
+            datos.get("peso_objetivo"),
+            datos.get("unidad_objetivo"),
             datos.get("precio_final", 0.0),
             datos.get("modificaciones", ""),
             datos.get("costo_calculado", 0.0),
@@ -220,8 +221,14 @@ class ProduccionRepository(CRUDRepository):
         return cursor.lastrowid
 
     def listar_detalles_por_orden(self, id_orden: int) -> List[Dict]:
+        """Detalles de la orden con el nombre del producto ya resuelto."""
         cursor = self._cursor()
-        cursor.execute("SELECT * FROM PRODUCCION_DETALLE WHERE id_orden = %s", (id_orden,))
+        cursor.execute("""
+            SELECT d.*, p.nombre_producto
+            FROM PRODUCCION_DETALLE d
+            JOIN PRODUCTOS p ON p.id_producto = d.id_producto
+            WHERE d.id_orden = %s
+        """, (id_orden,))
         return [dict(row) for row in cursor.fetchall()]
 
     def actualizar_detalle(self, id_detalle: int, datos: Dict[str, Any]) -> bool:
@@ -321,6 +328,16 @@ class ProduccionRepository(CRUDRepository):
         cursor = self._cursor()
         cursor.execute("SELECT * FROM PRODUCCION_INGREDIENTES_RESERVADOS WHERE id_orden = %s", (id_orden,))
         return [dict(row) for row in cursor.fetchall()]
+
+    def marcar_reserva_ingrediente_devuelta(self, id_reserva: int, cantidad_devuelta: float) -> bool:
+        """Registra cuánto de una reserva fue devuelto al inventario (al cancelar una orden)."""
+        cursor = self._cursor()
+        cursor.execute(
+            "UPDATE PRODUCCION_INGREDIENTES_RESERVADOS SET cantidad_devuelta = %s WHERE id_reserva = %s",
+            (cantidad_devuelta, id_reserva),
+        )
+        self._commit()
+        return cursor.rowcount > 0
 
     def crear_reserva_activo(self, datos: Dict[str, Any]) -> int:
         cursor = self._cursor()

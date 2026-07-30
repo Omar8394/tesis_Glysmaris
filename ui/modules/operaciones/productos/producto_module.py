@@ -280,11 +280,6 @@ class ProductoModule:
         datos["costos_indirectos"] = _con_id_activo(producto.get("costos_indirectos", []))
         datos["productos"] = producto.get("productos_combo", [])
 
-        if producto.get("mano_obra_es_porcentaje", True):
-            datos["mano_obra_porcentaje"] = producto.get("mano_obra")
-        else:
-            datos["mano_obra_monto"] = producto.get("mano_obra")
-
         return datos
 
     def _mostrar_wizard(self, wizard: ProductoWizard):
@@ -337,25 +332,52 @@ class ProductoModule:
         MensajeSistema.exito(self.page, "Producto duplicado correctamente.")
 
     def _ver_composicion(self, producto):
-        MensajeSistema.informacion(
-            self.page,
-            f"Composición de '{producto.get('nombre')}' — pendiente de implementar.",
-        )
-
-    def _alternar_activo(self, producto):
-
-        resultado = self._producto_service.eliminar(producto.get("id_producto"))
-
+        resultado = self._producto_service.obtener(producto.get("id_producto"))
         if resultado.fallo:
             MensajeSistema.error(self.page, resultado.mensaje)
             return
 
+        datos = resultado.datos
+        tipo = datos.get("tipo")
+        lineas = [f"Tipo: {tipo}"]
+
+        if tipo == "individual":
+            if datos.get("nombre_receta"):
+                lineas.append(f"Receta: {datos['nombre_receta']}")
+            for p in datos.get("presentaciones", []):
+                lineas.append(f"· {p.get('nombre')} — ${float(p.get('precio', 0) or 0):,.2f}")
+        elif tipo == "elaborado":
+            for c in datos.get("componentes", []):
+                lineas.append(f"· {c.get('tipo')}: {c.get('nombre')} x{c.get('cantidad')}")
+        elif tipo == "combo":
+            for item in datos.get("productos_combo", []):
+                lineas.append(f"· {item.get('nombre')} x{item.get('cantidad')}")
+
+        for e in datos.get("empaques", []):
+            lineas.append(f"Empaque: {e.get('nombre')} x{e.get('cantidad')}")
+
+        MensajeSistema.informacion(
+            self.page,
+            f"Composición de '{datos.get('nombre')}':\n" + "\n".join(lineas),
+        )
+
+    def _alternar_activo(self, producto):
+        """Activa o desactiva el producto (acción reversible desde la tarjeta)."""
+        resultado = self._producto_service.alternar_activo(producto.get("id_producto"))
+        if resultado.fallo:
+            MensajeSistema.error(self.page, resultado.mensaje)
+            return
         self._refrescar_catalogo()
-        MensajeSistema.exito(self.page, resultado.mensaje or "Producto desactivado.")
+        MensajeSistema.exito(self.page, resultado.mensaje)
 
     def _eliminar_producto(self, producto):
-        self._alternar_activo(producto)
-
+        """Elimina (desactiva definitivamente) el producto del catálogo."""
+        resultado = self._producto_service.eliminar(producto.get("id_producto"))
+        if resultado.fallo:
+            MensajeSistema.error(self.page, resultado.mensaje)
+            return
+        self._refrescar_catalogo()
+        MensajeSistema.exito(self.page, resultado.mensaje)
     # =====================================================
     # BÚSQUEDAS DEL ASISTENTE
     # =====================================================

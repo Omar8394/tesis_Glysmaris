@@ -106,10 +106,28 @@ class ProductoService(CRUDService):
         try:
             success = self._repo.eliminar(identificador)
             if not success:
-                return ServiceResult.error("No se pudo desactivar el producto.")
-            return ServiceResult.ok("Producto desactivado.")
+                return ServiceResult.error("No se pudo eliminar el producto.")
+            return ServiceResult.ok("Producto eliminado.")
         except Exception as e:
-            self._repo._rollback()   # 👈 nuevo
+            self._repo._rollback()
+            return ServiceResult.error(str(e))
+
+    def alternar_activo(self, identificador: int) -> ServiceResult:
+        """
+        Activa o desactiva un producto (reversible), a diferencia de
+        eliminar(): la tarjeta ofrece "Desactivar"/"Activar" como una
+        acción distinta de "Eliminar" -- antes ambas llamaban a
+        eliminar() y no había forma de reactivar un producto desde la
+        UI.
+        """
+        try:
+            nuevo_estado = self._repo.alternar_activo(identificador)
+            if nuevo_estado is None:
+                return ServiceResult.error("No se pudo cambiar el estado del producto.")
+            mensaje = "Producto activado." if nuevo_estado else "Producto desactivado."
+            return ServiceResult.ok(mensaje, datos={"activo": nuevo_estado})
+        except Exception as e:
+            self._repo._rollback()
             return ServiceResult.error(str(e))
 
     def buscar(self, texto: str) -> ServiceResult:
@@ -121,24 +139,20 @@ class ProductoService(CRUDService):
 
     def calcular_preview(self, datos: dict) -> ServiceResult:
         """
-        Calcula costo_total y precio_final para datos de un producto que
-        todavía se está armando (por ejemplo, en el wizard), SIN guardar
-        nada ni exigir que estén todos los campos obligatorios.
+        Calcula costo y precio SUGERIDO en vivo, sin tocar la base de
+        datos. Se usa desde ProductoWizard para mostrar el precio
+        sugerido mientras el usuario carga los datos.
 
-        A diferencia de crear()/actualizar(), acá los campos faltantes se
-        tratan como 0 / vacíos en vez de rechazar el cálculo. Esto permite
-        mostrarle al usuario un precio sugerido a medida que completa el
-        producto (por ejemplo, para sugerir el precio de una presentación
-        por pedazos antes de guardar).
+        ⚠️ Antes esto devolvía `ServiceResult.ok(datos={...})` -- un
+        set de un solo elemento (el objeto Ellipsis), no el resultado
+        del cálculo. Eso hacía que el wizard SIEMPRE recibiera un
+        precio sugerido de 0, sin importar los datos cargados.
         """
         try:
             datos_normalizados = self._normalizar_alias(dict(datos))
             datos_normalizados.setdefault("tipo", "individual")
             calculado = self._calcular_y_normalizar(datos_normalizados)
-            return ServiceResult.ok(datos={
-                "costo_total": calculado.get("costo_total", 0.0),
-                "precio_final": calculado.get("precio_final", 0.0),
-            })
+            return ServiceResult.ok(datos=calculado)
         except Exception as e:
             return ServiceResult.error(str(e))
 
@@ -263,25 +277,46 @@ class ProductoService(CRUDService):
             mano_obra_valor = float(datos.get("mano_obra", 0) or 0)
             margen = float(datos.get("margen_porcentaje", 40) or 40)
             costo_total = subtotal + mano_obra_valor
-            precio_final = costo_total * (1 + margen / 100)
+            precio_sugerido = costo_total * (1 + margen / 100)
 
             datos["costo_receta"] = round(costo_base, 2)
 
         else:  # combo: precio manual, no hay margen ni mano de obra propios
             precio_combo = float(datos.get("precio_combo", 0) or 0)
             descuento = float(datos.get("descuento_combo", 0) or 0)
-            precio_final = precio_combo * (1 - descuento / 100)
+            precio_sugerido = precio_combo * (1 - descuento / 100)
             mano_obra_valor = 0.0
             # Informativo: cuánto "valen" por separado los productos del combo.
             costo_total = costo_base
 
             datos["costo_receta"] = 0
 
+        # ✅ El precio sugerido SIEMPRE se calcula y se guarda aparte,
+        # como referencia. El precio de venta real (precio_final) es
+        # el que decide el usuario: si mandó "precio_venta" (el campo
+        # editable del wizard), se respeta tal cual; si no lo mandó,
+        # recién ahí se usa el sugerido como valor por defecto.
+        #
+        # Antes acá se pisaba `datos["precio_final"]` siempre con el
+        # valor calculado, sin mirar si el usuario había escrito un
+        # precio propio -- por eso el precio final que terminaba en
+        # la base de datos nunca coincidía con lo que el usuario
+        # tipeaba en el wizard.
+        precio_venta = datos.get("precio_venta")
+        if precio_venta not in (None, ""):
+            try:
+                precio_final = round(float(precio_venta), 2)
+            except (TypeError, ValueError):
+                precio_final = round(precio_sugerido, 2)
+        else:
+            precio_final = round(precio_sugerido, 2)
+
         datos["empaques_total"] = round(total_empaques, 2)
         datos["costos_indirectos_total"] = round(total_costos_indirectos, 2)
         datos["mano_obra"] = round(mano_obra_valor, 2)
         datos["costo_total"] = round(costo_total, 2)
-        datos["precio_final"] = round(precio_final, 2)
+        datos["precio_sugerido"] = round(precio_sugerido, 2)
+        datos["precio_final"] = precio_final
 
         return datos
 

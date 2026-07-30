@@ -58,7 +58,7 @@ class ProductoWizard(ft.Container):
     ]
 
     PASOS_INDIVIDUAL = ["Información", "Costos", "Presentaciones", "Resumen"]
-    PASOS_ELABORADO = ["Información", "Componentes", "Costos", "Empaques", "Resumen"]
+    PASOS_ELABORADO = ["Información", "Componentes", "Empaques", "Costos", "Resumen"]
     PASOS_COMBO = ["Información", "Productos", "Precio", "Resumen"]
 
     def __init__(
@@ -423,31 +423,23 @@ class ProductoWizard(ft.Container):
             ])
 
         else:
-            # ─── Comportamiento original para otros individuales ───
+            # ─── Presentación genérica (cualquier individual que NO
+            # sea de categoría "Tortas": galletas, cupcakes, donas,
+            # bebidas, etc.). Antes esta rama repetía el vocabulario de
+            # tortas (Diámetro, Completa/Por trozos), que no aplica a
+            # este tipo de producto -- ahora es "nombre de la
+            # presentación" + "cuántas unidades incluye" (por ejemplo
+            # "Caja x6" con cantidad_unidades=6, o "Unidad" con 1).
             self.txt_presentacion_nombre = CampoTexto(
-                etiqueta="Presentación (ej. Torta completa, Trozo individual)",
+                etiqueta="Presentación (ej. Unidad, Caja x6, Docena)",
                 width=260,
             )
-            self.dd_presentacion_tipo = Selector(
-                etiqueta="Se vende",
-                opciones=["Completa", "Por trozos"],
-                valor="Completa",
+            self.txt_presentacion_cantidad_unidades = CampoTexto(
+                etiqueta="Unidades que incluye",
                 width=160,
-                on_change=self._alternar_campos_trozos_original,
-            )
-            self.txt_presentacion_diametro = CampoTexto(
-                etiqueta="Diámetro (cm)",
-                width=140,
-                hint="Ej: 20",
+                hint="Ej: 1, 6, 12",
+                value="1",
                 keyboard_type=ft.KeyboardType.NUMBER,
-                visible=False,
-            )
-            self.txt_presentacion_cantidad_trozos = CampoTexto(
-                etiqueta="Cantidad de trozos",
-                width=160,
-                hint="Ej: 10",
-                keyboard_type=ft.KeyboardType.NUMBER,
-                visible=False,
                 on_change=self._actualizar_precio_sugerido_original,
             )
 
@@ -502,8 +494,7 @@ class ProductoWizard(ft.Container):
             )
 
             controles.extend([
-                ft.Row([self.txt_presentacion_nombre, self.dd_presentacion_tipo], spacing=AppSpacing.CONTROL_SPACING),
-                ft.Row([self.txt_presentacion_diametro, self.txt_presentacion_cantidad_trozos], spacing=AppSpacing.CONTROL_SPACING),
+                ft.Row([self.txt_presentacion_nombre, self.txt_presentacion_cantidad_unidades], spacing=AppSpacing.CONTROL_SPACING),
                 ft.Text("Empaques de esta presentación", weight=AppTypography.MEDIUM, size=AppTypography.SMALL),
                 ft.Row(
                     [self.autocompletado_presentacion_empaque, self.txt_presentacion_empaque_cantidad, boton_agregar_empaque],
@@ -537,16 +528,10 @@ class ProductoWizard(ft.Container):
             self.txt_cantidad_trozos.update()
         self._actualizar_precio_sugerido()
 
-    def _alternar_campos_trozos_original(self, e=None):
-        """Versión para productos no torta (mantiene compatibilidad)."""
-        mostrar = self.dd_presentacion_tipo.value == "Por trozos"
-        self.txt_presentacion_diametro.visible = mostrar
-        self.txt_presentacion_cantidad_trozos.visible = mostrar
-        if self.txt_presentacion_diametro.page:
-            self.txt_presentacion_diametro.update()
-        if self.txt_presentacion_cantidad_trozos.page:
-            self.txt_presentacion_cantidad_trozos.update()
-        self._actualizar_precio_sugerido_original()
+    def _actualizar_margen(self, e=None):
+        """El margen afecta el precio sugerido tanto de tortas (paso Presentaciones) como de elaborados (paso Costos)."""
+        self._actualizar_precio_sugerido()
+        self._actualizar_precio_sugerido_elaborado()
 
     def _actualizar_precio_sugerido(self, e=None):
         """Recalcula el precio sugerido para tortas."""
@@ -570,22 +555,23 @@ class ProductoWizard(ft.Container):
             self.txt_presentacion_precio_sugerido.update()
 
     def _actualizar_precio_sugerido_original(self, e=None):
-        """Versión original para productos no torta."""
+        """
+        Precio sugerido para presentaciones genéricas (no torta): el
+        costo base del producto multiplicado por la cantidad de
+        unidades que incluye esta presentación (1 para "Unidad", 6
+        para "Caja x6", etc.), más sus propios empaques.
+        """
         if self._es_torta:
             return
-        if not hasattr(self, "dd_presentacion_tipo") or not hasattr(self, "txt_presentacion_precio_sugerido"):
+        if not hasattr(self, "txt_presentacion_cantidad_unidades") or not hasattr(self, "txt_presentacion_precio_sugerido"):
             return
 
-        if self.dd_presentacion_tipo.value == "Por trozos":
-            try:
-                cantidad = float(self.txt_presentacion_cantidad_trozos.value or 0)
-            except ValueError:
-                cantidad = 0
-            fraccion = round(100 / cantidad, 4) if cantidad else 0.0
-        else:
-            fraccion = 100.0
+        try:
+            unidades = float(self.txt_presentacion_cantidad_unidades.value or 1) or 1
+        except ValueError:
+            unidades = 1
 
-        sugerido = self._precio_sugerido_actual(fraccion, self._empaques_presentacion_actual)
+        sugerido = self._precio_sugerido_actual(unidades * 100, self._empaques_presentacion_actual)
         self.txt_presentacion_precio_sugerido.value = f"{sugerido:.2f}"
         if self.txt_presentacion_precio_sugerido.page:
             self.txt_presentacion_precio_sugerido.update()
@@ -618,11 +604,8 @@ class ProductoWizard(ft.Container):
     def _filas_presentaciones(self) -> list[dict]:
         filas = []
         for p in self.presentaciones:
-            if p.get("es_por_trozos"):
-                diametro = p.get("diametro_cm")
-                detalle = f"Trozo ({diametro} cm, 1/{p.get('cantidad_trozos')})" if diametro else f"Trozo (1/{p.get('cantidad_trozos')})"
-            else:
-                detalle = "Completa"
+            unidades = p.get("cantidad_unidades", 1)
+            detalle = "1 unidad" if unidades == 1 else f"{unidades} unidades"
             empaques = p.get("empaques") or []
             texto_empaques = ", ".join(emp["nombre"] for emp in empaques) if empaques else "-"
             filas.append({
@@ -641,28 +624,13 @@ class ProductoWizard(ft.Container):
         if not nombre:
             return
 
-        es_por_trozos = self.dd_presentacion_tipo.value == "Por trozos"
-        diametro = None
-        cantidad_trozos = None
-        fraccion = 100.0
+        try:
+            unidades = float(self.txt_presentacion_cantidad_unidades.value or 1) or 1
+        except ValueError:
+            unidades = 1
+        fraccion = unidades * 100
 
-        if es_por_trozos:
-            try:
-                cantidad_trozos = int(float(self.txt_presentacion_cantidad_trozos.value or 0))
-            except ValueError:
-                cantidad_trozos = 0
-            if not cantidad_trozos:
-                self.txt_presentacion_cantidad_trozos.error_text = "Indicá en cuántos trozos se divide."
-                self.txt_presentacion_cantidad_trozos.update()
-                return
-            self.txt_presentacion_cantidad_trozos.error_text = None
-            try:
-                diametro = float(self.txt_presentacion_diametro.value or 0) or None
-            except ValueError:
-                diametro = None
-            fraccion = round(100 / cantidad_trozos, 4)
-
-        empaque = self._empaques_presentacion_actual.copy()
+        empaques = self._empaques_presentacion_actual.copy()
         precio_manual = (self.txt_presentacion_precio_manual.value or "").strip()
         if precio_manual:
             try:
@@ -670,47 +638,54 @@ class ProductoWizard(ft.Container):
             except ValueError:
                 precio = 0.0
         else:
-            precio = self._precio_sugerido_actual(fraccion, empaque)
+            precio = self._precio_sugerido_actual(fraccion, empaques)
 
         self.presentaciones.append({
             "nombre": nombre,
-            "es_por_trozos": es_por_trozos,
-            "diametro_cm": diametro,
-            "cantidad_trozos": cantidad_trozos,
-            "fraccion": fraccion,
-            "empaque": empaque,
+            "cantidad_unidades": unidades,
+            "empaques": empaques,
             "precio": precio,
         })
         self.tabla_presentaciones.reemplazar(self._filas_presentaciones())
 
         # Limpiar campos
         self.txt_presentacion_nombre.value = ""
-        self.dd_presentacion_tipo.value = "Completa"
-        self.txt_presentacion_diametro.value = ""
-        self.txt_presentacion_cantidad_trozos.value = ""
+        self.txt_presentacion_cantidad_unidades.value = "1"
         self.autocompletado_presentacion_empaque.limpiar()
         self.txt_presentacion_precio_manual.value = ""
         self._empaques_presentacion_actual.clear()
         self.tabla_empaques_presentacion.reemplazar([])
-        self._alternar_campos_trozos_original()
         self._actualizar_precio_sugerido_original()
 
     # ─── Cálculo de precio sugerido ───
 
     def _armar_datos_parciales_para_preview(self, empaques: list[dict] | None = None) -> dict:
-        """Arma un dict parcial para que el service calcule costo/precio en vivo."""
+        """
+        Arma un dict parcial para que el service calcule costo/precio en
+        vivo, según el tipo de producto real del wizard (antes esto
+        tenía "tipo": "individual" fijo, así que pedir un preview desde
+        el paso de Costos de un producto elaborado siempre calculaba
+        como si fuera individual).
+        """
         try:
             horas = float(self.txt_tiempo_preparacion.value or 0)
         except (ValueError, AttributeError):
             horas = 0.0
-        return {
-            "tipo": "individual",
-            "id_receta": getattr(self.autocompletado_receta, "obtener_id", lambda: None)(),
-            "empaques": empaques or [],
+
+        datos = {
+            "tipo": self.tipo or "individual",
+            "empaques": empaques if empaques is not None else list(getattr(self, "empaques", [])),
             "costos_indirectos_monto": self._costos_indirectos_estimados(horas),
             "mano_obra": self._mano_obra_estimada(horas),
-            "margen_porcentaje": float(self.txt_margen.value or 40),
+            "margen_porcentaje": float(getattr(self, "txt_margen", None) and self.txt_margen.value or 40),
         }
+
+        if self.tipo == "individual":
+            datos["id_receta"] = getattr(self.autocompletado_receta, "obtener_id", lambda: None)()
+        elif self.tipo == "elaborado":
+            datos["componentes"] = list(getattr(self, "componentes", []))
+
+        return datos
 
     def _precio_sugerido_actual(self, fraccion: float = 100.0, empaques: list[dict] | None = None) -> float:
         """Devuelve el precio sugerido para una fracción del producto."""
@@ -730,14 +705,14 @@ class ProductoWizard(ft.Container):
         """Junta los empaques de todas las presentaciones (para no-torta)."""
         acumulado: dict[int, dict] = {}
         for p in self.presentaciones:
-            empaque = p.get("empaque")
-            if not empaque or not empaque.get("id_activo"):
-                continue
-            id_activo = empaque["id_activo"]
-            if id_activo not in acumulado:
-                acumulado[id_activo] = dict(empaque)
-            else:
-                acumulado[id_activo]["cantidad"] = acumulado[id_activo].get("cantidad", 1) + empaque.get("cantidad", 1)
+            for empaque in (p.get("empaques") or []):
+                if not empaque or not empaque.get("id_activo"):
+                    continue
+                id_activo = empaque["id_activo"]
+                if id_activo not in acumulado:
+                    acumulado[id_activo] = dict(empaque)
+                else:
+                    acumulado[id_activo]["cantidad"] = acumulado[id_activo].get("cantidad", 1) + empaque.get("cantidad", 1)
         return list(acumulado.values())
 
     # =====================================================
@@ -892,7 +867,7 @@ class ProductoWizard(ft.Container):
             hint="Ej: 40",
             value=str(datos.get("margen_porcentaje", 40)),
             keyboard_type=ft.KeyboardType.NUMBER,
-            on_change=self._actualizar_precio_sugerido,
+            on_change=self._actualizar_margen,
         )
 
         self.txt_mano_obra_estimada = CampoTexto(
@@ -912,6 +887,34 @@ class ProductoWizard(ft.Container):
             ft.Row([self.txt_tiempo_preparacion, self.txt_margen], spacing=AppSpacing.CONTROL_SPACING),
             ft.Row([self.txt_mano_obra_estimada, self.txt_costos_indirectos_estimados], spacing=AppSpacing.CONTROL_SPACING),
         ]
+
+        # ✅ Los productos "elaborado" no pasan por el paso de
+        # Presentaciones (eso es solo para "individual"), así que este
+        # es el único lugar donde pueden fijar su precio de venta. El
+        # sugerido se recalcula solo; el campo de venta queda vacío
+        # (= usar el sugerido) salvo que el usuario escriba el suyo.
+        if self.tipo == "elaborado":
+            precio_sugerido_inicial = self._precio_sugerido_actual()
+            self.txt_precio_sugerido = CampoTexto(
+                etiqueta="Precio sugerido",
+                width=170,
+                read_only=True,
+                value=f"{precio_sugerido_inicial:.2f}",
+            )
+            precio_venta_inicial = datos.get("precio_venta") or datos.get("precio_final")
+            self.txt_precio_venta = CampoTexto(
+                etiqueta="Precio de venta",
+                width=170,
+                hint="Vacío = usar el sugerido",
+                keyboard_type=ft.KeyboardType.NUMBER,
+                value=str(precio_venta_inicial) if precio_venta_inicial else "",
+            )
+            contenido.append(
+                ft.Row(
+                    [self.txt_precio_sugerido, self.txt_precio_venta],
+                    spacing=AppSpacing.CONTROL_SPACING,
+                )
+            )
 
         tasas = self._obtener_tasas_hora()
         if not tasas or not tasas.get("costo_hora_total"):
@@ -985,6 +988,16 @@ class ProductoWizard(ft.Container):
         if self.txt_costos_indirectos_estimados.page:
             self.txt_costos_indirectos_estimados.update()
         self._actualizar_precio_sugerido()
+        self._actualizar_precio_sugerido_elaborado()
+
+    def _actualizar_precio_sugerido_elaborado(self, e=None):
+        """Recalcula el precio sugerido en el paso de Costos de un producto elaborado."""
+        if self.tipo != "elaborado" or not hasattr(self, "txt_precio_sugerido"):
+            return
+        sugerido = self._precio_sugerido_actual()
+        self.txt_precio_sugerido.value = f"{sugerido:.2f}"
+        if self.txt_precio_sugerido.page:
+            self.txt_precio_sugerido.update()
 
     # =====================================================
     # PASO: PRODUCTOS DEL COMBO
@@ -1126,6 +1139,8 @@ class ProductoWizard(ft.Container):
             ]
 
         elif self.tipo == "elaborado":
+            precio_venta_texto = (getattr(self, "txt_precio_venta", None) and self.txt_precio_venta.value or "").strip()
+            precio_sugerido_texto = getattr(self, "txt_precio_sugerido", None) and self.txt_precio_sugerido.value or "0"
             filas += [
                 ("Componentes", str(len(self.componentes))),
                 ("Empaques", str(len(self.empaques))),
@@ -1133,6 +1148,8 @@ class ProductoWizard(ft.Container):
                 ("Mano de obra (calculada)", self.txt_mano_obra_estimada.value),
                 ("Costos indirectos (calculados)", self.txt_costos_indirectos_estimados.value),
                 ("Margen de ganancia", f"{self.txt_margen.value or 40}%"),
+                ("Precio sugerido", f"${precio_sugerido_texto}"),
+                ("Precio de venta", f"${precio_venta_texto}" if precio_venta_texto else f"${precio_sugerido_texto} (sugerido)"),
             ]
 
         elif self.tipo == "combo":
@@ -1158,9 +1175,10 @@ class ProductoWizard(ft.Container):
             border_radius=8,
             bgcolor=self.tema.warning + "15",
             content=ft.Text(
-                "El costo y el precio final se recalculan al guardar con "
-                "los datos definitivos. Los precios sugeridos ya reflejan "
-                "el costo, la mano de obra y el margen cargados.",
+                "El costo se recalcula al guardar con los datos definitivos. "
+                "El precio sugerido ya refleja el costo, la mano de obra y el "
+                "margen cargados, pero el precio final es el que vos elegiste "
+                "(o el sugerido, si dejaste el campo de precio vacío).",
                 size=AppTypography.SMALL,
                 color=self.tema.warning,
             ),
@@ -1228,9 +1246,22 @@ class ProductoWizard(ft.Container):
                 datos["presentaciones"] = [presentacion]
                 # Los empaques consolidados para inventario se toman de la presentación
                 datos["empaques"] = self._consolidar_empaques_presentaciones()
+                # ✅ El precio de venta del producto es el de su única
+                # presentación (antes esto no se mandaba y el
+                # precio_final terminaba siendo siempre el calculado,
+                # ignorando lo que el usuario tipeó acá).
+                datos["precio_venta"] = presentacion["precio"]
             else:
                 datos["presentaciones"] = self.presentaciones
                 datos["empaques"] = self._consolidar_empaques_presentaciones()
+                # ✅ Con varias presentaciones no hay "un" precio único;
+                # usamos el de la primera como precio de referencia del
+                # producto (el que se ve en la tarjeta del catálogo y el
+                # que se usa si este producto se incluye en un combo o
+                # como subproducto de otro elaborado). La venta real de
+                # cada presentación sigue usando su propio precio.
+                if self.presentaciones:
+                    datos["precio_venta"] = self.presentaciones[0].get("precio")
 
         elif self.tipo == "elaborado":
             datos["componentes"] = self.componentes
@@ -1239,6 +1270,15 @@ class ProductoWizard(ft.Container):
             datos["tiempo_preparacion_minutos"] = round(horas * 60, 2)
             datos["mano_obra"] = self._mano_obra_estimada(horas)
             datos["costos_indirectos_monto"] = self._costos_indirectos_estimados(horas)
+            # ✅ Antes no existía ningún campo para que el usuario
+            # eligiera el precio de venta de un producto elaborado:
+            # salía siempre el calculado (costo x margen).
+            precio_venta = (getattr(self, "txt_precio_venta", None) and self.txt_precio_venta.value or "").strip()
+            if precio_venta:
+                try:
+                    datos["precio_venta"] = float(precio_venta)
+                except ValueError:
+                    pass
 
         elif self.tipo == "combo":
             datos["productos"] = self.productos_combo

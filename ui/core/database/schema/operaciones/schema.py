@@ -107,6 +107,7 @@ SCHEMA_OPERACIONES = [
         empaques DECIMAL(10,2) DEFAULT 0,
         costos_indirectos DECIMAL(10,2) DEFAULT 0,
         margen_porcentaje DECIMAL(5,2) DEFAULT 40,
+        precio_sugerido DECIMAL(10,2) NOT NULL DEFAULT 0,
         costo_total DECIMAL(10,2) DEFAULT 0,
         precio_final DECIMAL(10,2) DEFAULT 0,
         precio_combo DECIMAL(10,2) DEFAULT 0,
@@ -124,6 +125,8 @@ SCHEMA_OPERACIONES = [
         id_producto INT NOT NULL,
         nombre VARCHAR(100) NOT NULL,
         precio DECIMAL(10,2) NOT NULL DEFAULT 0,
+        diametro_cm DECIMAL(6,2) NULL,
+        cantidad_trozos INT NULL,
         FOREIGN KEY (id_producto) REFERENCES PRODUCTOS(id_producto) ON DELETE CASCADE
     )
     """,
@@ -221,6 +224,8 @@ SCHEMA_OPERACIONES = [
         id_presentacion INT NULL,
         cantidad_planificada INT NOT NULL DEFAULT 1,
         cantidad_obtenida INT DEFAULT 0,
+        peso_objetivo DECIMAL(10,2) NULL,
+        unidad_objetivo VARCHAR(20) NULL,
         precio_final DECIMAL(10,2) DEFAULT 0,
         modificaciones TEXT,
         costo_calculado DECIMAL(10,2) DEFAULT 0,
