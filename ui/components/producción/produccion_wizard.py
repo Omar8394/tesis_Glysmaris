@@ -58,6 +58,10 @@ class ProduccionWizard(ft.Container):
         # el usuario en el Paso 2 cuando el análisis dio resultado parcial.
         self._decisiones_analisis: Dict[int, str] = {}
         self.datos_planificacion: Dict = {}
+        # Producto que el usuario clickeó en las sugerencias del
+        # autocompletado, pendiente de que presione "Agregar" (ver
+        # _elegir_sugerencia / _agregar_producto).
+        self._producto_elegido: Optional[Dict] = None
 
         # --- Construir componentes por paso ---
         self._crear_paso1()
@@ -128,6 +132,7 @@ class ProduccionWizard(ft.Container):
             ],
             spacing=AppSpacing.CONTROL_SPACING,
             width=750,
+            height=620,
         )
 
         # No se llama a update() acá: el contenedor todavía no está
@@ -185,17 +190,19 @@ class ProduccionWizard(ft.Container):
                     size=AppTypography.SECTION_TITLE,
                     weight="bold",
                 ),
+                self.buscador_productos,
+                self.resultados_busqueda,
                 ft.Row(
-                    [self.buscador_productos, self.cantidad_input, self.peso_input, self.btn_agregar],
+                    [self.cantidad_input, self.peso_input, self.btn_agregar],
                     spacing=AppSpacing.CONTROL_SPACING,
                 ),
-                self.resultados_busqueda,
                 ft.Divider(height=10),
                 ft.Text("Productos agregados:", weight="bold"),
                 self.lista_agregados,
             ],
             spacing=AppSpacing.CONTROL_SPACING,
             expand=True,
+            scroll=ft.ScrollMode.AUTO,
         )
 
     def _crear_paso2(self):
@@ -213,6 +220,7 @@ class ProduccionWizard(ft.Container):
             ],
             spacing=AppSpacing.CONTROL_SPACING,
             expand=True,
+            scroll=ft.ScrollMode.AUTO,
         )
         self.paso2_contenido = self.analisis_contenido
 
@@ -271,6 +279,7 @@ class ProduccionWizard(ft.Container):
             ],
             spacing=AppSpacing.CONTROL_SPACING,
             expand=True,
+            scroll=ft.ScrollMode.AUTO,
         )
         self.paso4_contenido = self.resumen_contenido
 
@@ -375,7 +384,7 @@ class ProduccionWizard(ft.Container):
                     spacing=10,
                 ),
                 padding=8,
-                on_click=lambda e, prod=p: self._seleccionar_producto(prod),
+                on_click=lambda e, prod=p: self._elegir_sugerencia(prod),
                 ink=True,
                 border_radius=5,
             )
@@ -401,6 +410,26 @@ class ProduccionWizard(ft.Container):
         if not rendimiento_unidad:
             return False
         return rendimiento_unidad not in self._UNIDADES_CONTEO
+
+    def _elegir_sugerencia(self, producto: Dict):
+        """Se llama al hacer click en una sugerencia del autocompletado.
+
+        Antes, este click llamaba directamente a _seleccionar_producto y
+        agregaba el producto a la lista al toque -- por eso la cantidad
+        quedaba pegada en 1 y el peso vacío: el usuario todavía no había
+        alcanzado a escribirlos. Ahora solo llena el campo de nombre con
+        el producto elegido; recién cuando el usuario presiona "Agregar"
+        (_agregar_producto) se suma a productos_seleccionados, con la
+        cantidad y el peso que haya cargado en ese momento.
+        """
+        self._producto_elegido = producto
+        # Se asume que Buscador expone un método "establecer" simétrico a
+        # obtener()/limpiar() para fijar el texto por código. Si tu
+        # componente Buscador usa otro nombre, avisame cuál es y lo ajusto.
+        self.buscador_productos.establecer(producto["nombre"])
+        self.resultados_busqueda.visible = False
+        if self.page:
+            self.update()
 
     def _seleccionar_producto(self, producto: Dict):
         for p in self.productos_seleccionados:
@@ -452,36 +481,44 @@ class ProduccionWizard(ft.Container):
         self.buscador_productos.limpiar()
         self.cantidad_input.value = "1"   # reset para el siguiente producto
         self.peso_input.value = ""
+        self._producto_elegido = None
         if self.page:
             self.update()
 
     def _agregar_producto(self, e):
-        texto = self.buscador_productos.obtener() or ""
+        texto = (self.buscador_productos.obtener() or "").strip()
         if not texto:
             self._mostrar_error("Busque un producto primero.")
             return
 
-        resultado_busqueda = self.producto_service.buscar(texto)
-        productos = resultado_busqueda.datos if resultado_busqueda.exito else []
-        if not productos:
-            self._mostrar_error("Producto no encontrado.")
-            return
+        # Si el campo todavía tiene el nombre de la sugerencia que el
+        # usuario clickeó, usamos ese producto exacto en vez de repetir
+        # la búsqueda -- evita agregar un producto distinto cuando hay
+        # varios con nombres parecidos.
+        if self._producto_elegido and self._producto_elegido.get("nombre") == texto:
+            producto = self._producto_elegido
+        else:
+            resultado_busqueda = self.producto_service.buscar(texto)
+            productos = resultado_busqueda.datos if resultado_busqueda.exito else []
+            if not productos:
+                self._mostrar_error("Producto no encontrado.")
+                return
+            producto = productos[0]
 
-        self._seleccionar_producto(productos[0])
+        self._seleccionar_producto(producto)
 
     def _refrescar_lista_agregados(self):
         self.lista_agregados.controls.clear()
         for idx, p in enumerate(self.productos_seleccionados):
-            texto_peso = (
-                f"{p['peso_objetivo']} {p.get('unidad_objetivo') or ''}".strip()
-                if p.get("peso_objetivo")
-                else None
-            )
+            if p.get("peso_objetivo"):
+                texto_peso = f"Peso: {p['peso_objetivo']} {p.get('unidad_objetivo') or ''}".strip()
+            else:
+                texto_peso = "Peso: —"
             fila = ft.Row(
                 [
                     ft.Text(f"{p['nombre']}", expand=True, weight="bold"),
                     ft.Text(f"Cantidad: {p['cantidad']}", width=100),
-                    ft.Text(f"c/u: {texto_peso}" if texto_peso else "", width=120),
+                    ft.Text(texto_peso, width=150, color=ft.colors.GREY_700),
                     ft.IconButton(
                         icon=ft.icons.DELETE,
                         icon_color=ft.colors.RED,
@@ -741,7 +778,6 @@ class ProduccionWizard(ft.Container):
                     ),
                 ],
                 spacing=20,
-                expand=True,
             )
         )
 

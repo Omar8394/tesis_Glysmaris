@@ -85,6 +85,55 @@ class ProductoService(CRUDService):
         except Exception as e:
             return ServiceResult.error(str(e))
 
+    def crear_recuperable(self, nombre: str, unidad: str = "", costo_unitario: float = 0.0) -> ServiceResult:
+        """Da de alta el producto-catálogo mínimo de un recuperable de
+        merma (ej. "trozos de torta"): no nace de una receta ni de otros
+        componentes, es la materia sobrante en sí misma -- por eso NO pasa
+        por crear()/validar(), que exigen receta ("individual") o al
+        menos un componente ("elaborado"). Se guarda directo como
+        "elaborado" con componentes=[] (el repositorio ya tolera una
+        lista de componentes vacía sin error) y precio de referencia
+        opcional a partir de lo que costó la merma.
+
+        Una vez creado, ya queda disponible para elegirse como
+        "Producto"/"Subproducto" al armar otro producto elaborado en
+        ProductoWizard (busca sobre el mismo catálogo de PRODUCTOS), y
+        para editarle después empaques, margen o precio como a cualquier
+        otro producto.
+        """
+        nombre = (nombre or "").strip()
+        if not nombre:
+            return ServiceResult.error("El nombre del recuperable es obligatorio.")
+
+        datos = {
+            "tipo": "elaborado",
+            "nombre": nombre,
+            "categoria": "Recuperados",
+            "descripcion": f"Generado a partir de una merma recuperable ({unidad}).".strip(),
+            "componentes": [],
+            "empaques": [],
+            "costos_indirectos": [],
+            "margen_porcentaje": 0,
+            "mano_obra": 0,
+            "costos_indirectos_monto": 0,
+        }
+        if costo_unitario:
+            # No hay receta de la que calcular un costo, así que el
+            # costo aproximado de la merma se usa directo como precio de
+            # referencia (en vez de arrancar en $0 hasta que alguien lo
+            # edite a mano).
+            datos["precio_venta"] = round(float(costo_unitario), 2)
+
+        datos = self._calcular_y_normalizar(datos)
+        try:
+            nuevo_id = self._repo.crear(datos)
+            return ServiceResult.ok(
+                f"Producto recuperable '{nombre}' creado.",
+                datos={"id_producto": nuevo_id, "precio_final": datos["precio_final"]},
+            )
+        except Exception as e:
+            return ServiceResult.error(str(e))
+
     def actualizar(self, identificador: int, datos: dict) -> ServiceResult:
         datos = self._normalizar_alias(datos)
 
@@ -360,9 +409,39 @@ class ProductoService(CRUDService):
     def _calcular_costo_componentes(self, componentes: list[dict]) -> float:
         """
         `componentes` es [{"tipo": "ingrediente"|"producto"|"subproducto",
-        "id": int, "cantidad": float}]. Un "subproducto" se calcula igual
-        que un "producto": usa su precio_final ya guardado (no se
-        recalcula recursivamente, evita ciclos).
+        "id": int, "cantidad": float}].
+
+        ⚠️ REGLA CLAVE (ver documento de requerimientos de Producto
+        Elaborado): cuando el componente es un producto (individual o
+        elaborado), solo se toma su costo de MATERIA PRIMA -- nunca su
+        precio_final. El precio_final ya incluye margen de ganancia,
+        mano de obra, empaques y servicios propios de ESE producto, y
+        esos conceptos no se heredan: la nueva elaboración calcula los
+        suyos por separado más abajo (empaque, mano de obra, costos
+        indirectos, margen). Antes este método usaba precio_final para
+        "producto" y "subproducto" por igual, lo que inflaba el costo
+        de cualquier elaborado que usara otro producto como componente
+        con el margen/mano de obra/empaque ya cobrados en ese producto.
+
+        Por tipo de componente:
+          - "ingrediente": costo_unitario del lote x cantidad_usada.
+          - "producto" (individual o elaborado, sin distinguirse en el
+            schema): costo_receta / rendimiento_cantidad x cantidad_usada.
+            costo_receta es, para ambos casos, el costo de materia prima
+            ya guardado (para individual: suma de ingredientes de su
+            receta; para elaborado: suma de sus propios componentes,
+            calculada al guardarse ESE producto -- por eso acá no hace
+            falta recalcular, evita ciclos). Si el producto no tiene
+            rendimiento definido (los elaborados no tienen receta_id
+            propio, así que no hay rendimiento_cantidad de RECETAS que
+            aplicar), se usa costo_receta directamente como costo
+            unitario, tal como indica el documento para ese caso ("se
+            usa directamente el costo total de su receta").
+          - "subproducto" (merma recuperable dada de alta como producto
+            vía crear_recuperable()): ya tiene un precio_final que ES su
+            costo por unidad (costo_asociado / cantidad_recuperada, sin
+            margen ni mano de obra agregados). Se usa precio_final x
+            cantidad_usada directamente, sin dividir por rendimiento.
         """
         total = 0.0
         for c in componentes or []:
@@ -377,7 +456,15 @@ class ProductoService(CRUDService):
                 if res.exito:
                     total += cantidad * float(res.datos.get("costo_unitario", 0))
 
-            elif tipo_c in ("producto", "subproducto"):
+            elif tipo_c == "producto":
+                res = self.obtener(id_c)
+                if res.exito:
+                    costo_receta = float(res.datos.get("costo_receta", 0) or 0)
+                    rendimiento = float(res.datos.get("rendimiento_cantidad", 0) or 0)
+                    costo_unitario = (costo_receta / rendimiento) if rendimiento > 0 else costo_receta
+                    total += cantidad * costo_unitario
+
+            elif tipo_c == "subproducto":
                 res = self.obtener(id_c)
                 if res.exito:
                     total += cantidad * float(res.datos.get("precio_final", 0))

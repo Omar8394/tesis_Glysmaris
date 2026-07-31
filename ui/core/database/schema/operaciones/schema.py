@@ -248,6 +248,7 @@ SCHEMA_OPERACIONES = [
         id_detalle INT NULL,
         id_producto INT NULL,
         cantidad DECIMAL(10,2) NOT NULL,
+        unidad VARCHAR(30) NULL,
         tipo_merma ENUM('recuperable', 'no_recuperable') NOT NULL,
         motivo ENUM(
             'quemado',
@@ -257,6 +258,12 @@ SCHEMA_OPERACIONES = [
             'decoracion',
             'otro'
         ) NOT NULL,
+        -- Solo aplica cuando tipo_merma='recuperable': nombre de lo que
+        -- quedó (ej. "trozos de torta", "polvo de galleta"), con el que
+        -- luego se crea o se identifica su fila en PRODUCTOS/
+        -- PRODUCCION_SUBPRODUCTOS para poder reutilizarlo como componente
+        -- de un nuevo producto elaborado.
+        nombre_recuperado VARCHAR(150) NULL,
         descripcion TEXT,
         costo_asociado DECIMAL(10,2) DEFAULT 0,
         fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -278,6 +285,11 @@ SCHEMA_OPERACIONES = [
         id_producto_subproducto INT NOT NULL,
         cantidad DECIMAL(10,2) NOT NULL,
         unidad VARCHAR(30),
+        -- Stock del recuperable todavía disponible para usarse como
+        -- componente de otro producto (arranca en "cantidad" y baja a
+        -- medida que se consume, igual que stock_actual en
+        -- LOTES_INVENTARIO para los ingredientes normales).
+        stock_actual DECIMAL(10,2) NOT NULL DEFAULT 0,
         fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (id_merma) REFERENCES PRODUCCION_MERMAS(id_merma) ON DELETE CASCADE,
         FOREIGN KEY (id_detalle) REFERENCES PRODUCCION_DETALLE(id_detalle) ON DELETE SET NULL,

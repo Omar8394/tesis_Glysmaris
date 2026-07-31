@@ -280,29 +280,32 @@ class ProduccionService(CRUDService):
             })
 
         # Registro de mermas y, si son recuperables, del subproducto que
-        # generaron (solo bitácora: no hay todavía stock de subproductos
-        # reutilizable en otra producción).
+        # generaron: se busca (o crea) el producto-catálogo con el nombre
+        # recuperado y se deja su stock disponible en
+        # PRODUCCION_SUBPRODUCTOS, listo para elegirse luego como
+        # componente de un producto elaborado (PRODUCTO_COMPONENTES).
+        advertencias_subproducto: List[str] = []
         for merma in datos_finalizacion.get("mermas", []):
             id_merma = self.repo.crear_merma({
                 "id_orden": id_orden,
                 "id_detalle": merma.get("id_detalle"),
                 "id_producto": merma.get("id_producto"),
                 "cantidad": merma["cantidad"],
+                "unidad": merma.get("unidad"),
                 "tipo_merma": merma["tipo_merma"],
                 "motivo": merma["motivo"],
+                "nombre_recuperado": merma.get("nombre_recuperado"),
                 "descripcion": merma.get("descripcion", ""),
                 "costo_asociado": merma.get("costo_asociado", 0.0),
             })
 
-            subproducto = merma.get("subproducto")
-            if merma["tipo_merma"] == "recuperable" and subproducto:
-                self.repo.crear_subproducto({
-                    "id_merma": id_merma,
-                    "id_detalle": merma.get("id_detalle"),
-                    "id_producto_subproducto": subproducto["id_producto_subproducto"],
-                    "cantidad": subproducto["cantidad"],
-                    "unidad": subproducto.get("unidad", ""),
-                })
+            if merma["tipo_merma"] == "recuperable":
+                resultado_sub = self._registrar_subproducto_recuperado(id_merma, merma)
+                if resultado_sub.fallo:
+                    # No se revierte la orden por esto: la merma ya quedó
+                    # guardada, solo avisamos que el recuperable no quedó
+                    # disponible como insumo para reutilizar.
+                    advertencias_subproducto.append(resultado_sub.mensaje)
 
         fecha_fin = datetime.now()
         costo_real = sum(
@@ -318,7 +321,11 @@ class ProduccionService(CRUDService):
         datos_orden["tiempo_real_minutos"] = tiempo_real
         self.repo.actualizar_orden(id_orden, datos_orden)
         self.repo.actualizar_estado_orden(id_orden, "finalizada")
-        return ServiceResult.ok("Orden finalizada exitosamente.")
+
+        mensaje = "Orden finalizada exitosamente."
+        if advertencias_subproducto:
+            mensaje += " Aviso: " + "; ".join(advertencias_subproducto)
+        return ServiceResult.ok(mensaje)
 
     def cancelar_orden(self, id_orden: int) -> ServiceResult:
         orden = self.repo.obtener_orden(id_orden)
@@ -464,6 +471,87 @@ class ProduccionService(CRUDService):
     # =========================================================
     # HELPERS PRIVADOS
     # =========================================================
+
+    def _registrar_subproducto_recuperado(self, id_merma: int, merma: Dict[str, Any]) -> ServiceResult:
+        """A partir de una merma recuperable, deja el sobrante disponible
+        como insumo reutilizable: resuelve su fila en PRODUCTOS (por id ya
+        conocido, o buscando/creando por nombre) y registra el lote en
+        PRODUCCION_SUBPRODUCTOS con stock_actual = lo recuperado, para
+        que después se pueda elegir como componente de un producto
+        elaborado (ver PRODUCTO_COMPONENTES, tipo_componente='subproducto').
+
+        Admite dos formas de indicar qué producto es el recuperable:
+        - merma["subproducto"]["id_producto_subproducto"]: ya resuelto por
+          quien llama (por si algún flujo futuro elige un recuperable
+          existente de una lista en vez de escribir el nombre).
+        - merma["nombre_recuperado"]: nombre libre tipeado en el diálogo de
+          mermas (caso actual); acá se busca un producto con ese nombre
+          exacto y, si no existe, se crea (ver
+          _resolver_o_crear_producto_subproducto / ProductoService.crear_recuperable).
+        """
+        subproducto = merma.get("subproducto")
+        cantidad = float(subproducto["cantidad"]) if subproducto else float(merma.get("cantidad", 0))
+        unidad = (subproducto or {}).get("unidad") or merma.get("unidad") or ""
+
+        if cantidad <= 0:
+            return ServiceResult.ok()
+
+        if subproducto and subproducto.get("id_producto_subproducto"):
+            id_producto_subproducto = subproducto["id_producto_subproducto"]
+        else:
+            nombre = (merma.get("nombre_recuperado") or "").strip()
+            if not nombre:
+                # Merma recuperable sin nombre: se guardó la merma en sí,
+                # pero no hay con qué identificar el insumo recuperado.
+                return ServiceResult.ok()
+            # El costo asociado a la merma (si se cargó) se prorratea
+            # como costo unitario de referencia para el producto nuevo,
+            # en vez de arrancar siempre en $0.
+            costo_asociado = float(merma.get("costo_asociado", 0) or 0)
+            costo_unitario = (costo_asociado / cantidad) if costo_asociado and cantidad else 0.0
+            resultado_producto = self._resolver_o_crear_producto_subproducto(nombre, unidad, costo_unitario)
+            if resultado_producto.fallo:
+                return resultado_producto
+            id_producto_subproducto = resultado_producto.datos["id_producto"]
+
+        self.repo.crear_subproducto({
+            "id_merma": id_merma,
+            "id_detalle": merma.get("id_detalle"),
+            "id_producto_subproducto": id_producto_subproducto,
+            "cantidad": cantidad,
+            "unidad": unidad,
+            "stock_actual": cantidad,
+        })
+        return ServiceResult.ok()
+
+    def _resolver_o_crear_producto_subproducto(self, nombre: str, unidad: str, costo_unitario: float = 0.0) -> ServiceResult:
+        """Busca un producto-catálogo ya existente con ese nombre (para
+        que mermas recuperadas repetidas -ej. "trozos de torta" salidas
+        de varias órdenes- se acumulen sobre el mismo producto en vez de
+        duplicarlo); si no existe, lo crea con
+        ProductoService.crear_recuperable(), que da de alta un producto
+        mínimo sin exigirle receta ni componentes propios (un recuperable
+        no tiene ninguna de las dos cosas).
+        """
+        if not self._producto_service:
+            return ServiceResult.error("No hay servicio de productos configurado.")
+
+        resultado_busqueda = self._producto_service.buscar(nombre)
+        productos = resultado_busqueda.datos if resultado_busqueda.exito else []
+        coincidencia = next(
+            (p for p in productos if (p.get("nombre") or "").strip().lower() == nombre.strip().lower()),
+            None,
+        )
+        if coincidencia:
+            return ServiceResult.ok(datos={"id_producto": coincidencia["id_producto"]})
+
+        resultado_creacion = self._producto_service.crear_recuperable(nombre, unidad, costo_unitario)
+        if resultado_creacion.fallo:
+            return ServiceResult.error(
+                f"No se pudo crear el producto recuperable '{nombre}': {resultado_creacion.mensaje}"
+            )
+        return ServiceResult.ok(datos={"id_producto": resultado_creacion.datos["id_producto"]})
+
 
     def _resolver_requerimientos_producto(
         self,

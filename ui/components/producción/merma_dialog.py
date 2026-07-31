@@ -30,6 +30,10 @@ class MermaDialog:
 
     TIPOS = ["recuperable", "no_recuperable"]
     MOTIVOS = ["quemado", "rotura", "contaminacion", "error_preparacion", "decoracion", "otro"]
+    # Unidad en la que se mide la cantidad de la merma: puede ser por
+    # conteo (ej. "3 galletas rotas") o por peso/volumen (ej. "20g de
+    # retazos de torta"), según convenga para ese recuperable en particular.
+    UNIDADES = ["unidad", "g", "kg", "ml", "l"]
 
     def __init__(self, page: ft.Page, id_orden: int, detalles: list[dict], on_guardar: callable):
         self.page = page
@@ -44,14 +48,30 @@ class MermaDialog:
 
         self.producto = Selector(etiqueta="Producto", opciones=etiquetas, valor=etiquetas[0], width=220)
         self.cantidad = CampoTexto(
-            etiqueta="Cantidad", width=110, keyboard_type=ft.KeyboardType.NUMBER, value="0"
+            etiqueta="Cantidad", width=100, keyboard_type=ft.KeyboardType.NUMBER, value="0"
         )
-        self.tipo = Selector(etiqueta="Tipo", opciones=self.TIPOS, valor="no_recuperable", width=160)
-        self.motivo = Selector(etiqueta="Motivo", opciones=self.MOTIVOS, valor="otro", width=180)
+        self.unidad = Selector(etiqueta="Unidad", opciones=self.UNIDADES, valor="unidad", width=110)
+        self.tipo = Selector(
+            etiqueta="Tipo",
+            opciones=self.TIPOS,
+            valor="no_recuperable",
+            width=160,
+            on_change=self._toggle_recuperable,
+        )
+        self.motivo = Selector(etiqueta="Motivo", opciones=self.MOTIVOS, valor="otro", width=170)
+        # Solo aplica a mermas "recuperable": ese sobrante pasa a ser un
+        # insumo con identidad propia (ej. "trozos de torta", "polvo de
+        # galleta") que puede reutilizarse luego, por eso necesita nombre.
+        self.nombre_recuperado = CampoTexto(
+            etiqueta="Nombre del recuperable",
+            width=460,
+            hint="Ej: trozos de torta, polvo de galleta...",
+        )
+        self.nombre_recuperado.visible = False
         self.descripcion = CampoTexto(
-            etiqueta="Descripción", multiline=True, width=470, hint="Detalles adicionales..."
+            etiqueta="Descripción", multiline=True, width=460, hint="Detalles adicionales..."
         )
-        self.lista_mermas = ft.Column(spacing=4)
+        self.lista_mermas = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO, height=160)
 
     @staticmethod
     def _etiqueta_detalle(detalle: dict) -> str:
@@ -64,9 +84,14 @@ class MermaDialog:
             [
                 ft.Text(f"Registrar mermas para orden #{self.id_orden}", weight="bold"),
                 ft.Row(
-                    [self.producto, self.cantidad, self.tipo, self.motivo],
+                    [self.producto, self.cantidad, self.unidad],
                     spacing=AppSpacing.CONTROL_SPACING,
                 ),
+                ft.Row(
+                    [self.tipo, self.motivo],
+                    spacing=AppSpacing.CONTROL_SPACING,
+                ),
+                ft.Row([self.nombre_recuperado]),
                 ft.Row([self.descripcion]),
                 ft.Row([BotonSecundario(texto="Agregar merma", icono=ft.icons.ADD, on_click=self._agregar)]),
                 ft.Divider(height=5),
@@ -74,7 +99,8 @@ class MermaDialog:
                 self.lista_mermas,
             ],
             spacing=AppSpacing.CONTROL_SPACING,
-            width=500,
+            width=560,
+            scroll=ft.ScrollMode.AUTO,
         )
 
         self.dialogo = Dialogo.personalizado(
@@ -87,9 +113,17 @@ class MermaDialog:
                 ),
                 BotonPrimario(texto="Finalizar orden", icono=ft.icons.SAVE, on_click=self._finalizar),
             ],
-            ancho=550,
+            ancho=650,
             modal=True,
         )
+
+    def _toggle_recuperable(self, e):
+        """Muestra el campo de nombre solo cuando la merma es recuperable
+        -- una merma no_recuperable es solo descarte, no necesita nombre
+        propio porque no se va a reutilizar como insumo."""
+        self.nombre_recuperado.visible = (self.tipo.value == "recuperable")
+        if self.nombre_recuperado.page:
+            self.nombre_recuperado.update()
 
     def _agregar(self, e):
         """Agrega una merma a la lista pendiente de guardar (no cierra el diálogo)."""
@@ -101,18 +135,30 @@ class MermaDialog:
             self._mostrar_error("La cantidad debe ser mayor a 0.")
             return
 
+        es_recuperable = self.tipo.value == "recuperable"
+        nombre_recuperado = (self.nombre_recuperado.value or "").strip()
+        if es_recuperable and not nombre_recuperado:
+            self._mostrar_error(
+                "Indicá un nombre para el recuperable (ej. trozos de torta, "
+                "polvo de galleta)."
+            )
+            return
+
         detalle = self._detalles_por_etiqueta.get(self.producto.value)
         self._mermas.append({
             "id_detalle": detalle.get("id_detalle") if detalle else None,
             "id_producto": detalle.get("id_producto") if detalle else None,
             "cantidad": cantidad,
+            "unidad": self.unidad.value,
             "tipo_merma": self.tipo.value,
             "motivo": self.motivo.value,
+            "nombre_recuperado": nombre_recuperado if es_recuperable else None,
             "descripcion": self.descripcion.value or "",
         })
 
         self.cantidad.value = "0"
         self.descripcion.value = ""
+        self.nombre_recuperado.value = ""
         self._refrescar_lista()
 
     def _refrescar_lista(self):
@@ -120,11 +166,14 @@ class MermaDialog:
         for idx, m in enumerate(self._mermas):
             detalle = next((d for d in self.detalles if d.get("id_detalle") == m["id_detalle"]), None)
             nombre = self._etiqueta_detalle(detalle) if detalle else "General"
+            texto = f"• {nombre}: {m['cantidad']} {m.get('unidad', '')} ({m['tipo_merma']}, {m['motivo']})"
+            if m.get("nombre_recuperado"):
+                texto += f" → recuperado como: {m['nombre_recuperado']}"
             self.lista_mermas.controls.append(
                 ft.Row(
                     [
                         ft.Text(
-                            f"• {nombre}: {m['cantidad']} ({m['tipo_merma']}, {m['motivo']})",
+                            texto,
                             expand=True,
                             size=12,
                         ),
