@@ -50,8 +50,16 @@ class VentasModule(Module):
     def _cargar_productos(self) -> list:
         """Obtiene productos ya finalizados en producción y con stock vendible."""
         try:
-            return self.venta_service.listar_productos_disponibles()
-        except Exception:
+            productos = self.venta_service.listar_productos_disponibles()
+            # Depuración: imprimir los primeros productos con sus precios
+            print(f"Productos obtenidos: {len(productos)}")
+            for p in productos[:5]:
+                print(f"ID: {p.get('id_producto')}, Nombre: {p.get('nombre')}, Precio: {p.get('precio_venta')} (tipo: {type(p.get('precio_venta'))})")
+            return productos
+        except Exception as e:
+            print(f"Error al cargar productos: {e}")
+            import traceback
+            traceback.print_exc()
             return []
 
     def _cargar_activos(self) -> list:

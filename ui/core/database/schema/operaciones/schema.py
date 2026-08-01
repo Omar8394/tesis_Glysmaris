@@ -112,6 +112,15 @@ SCHEMA_OPERACIONES = [
         precio_final DECIMAL(10,2) DEFAULT 0,
         precio_combo DECIMAL(10,2) DEFAULT 0,
         descuento_combo DECIMAL(5,2) DEFAULT 0,
+        -- Unidad "nativa" del producto para poder validar coherencia de
+        -- unidades cuando se usa como componente de otro producto
+        -- elaborado (ver PRODUCTO_COMPONENTES.unidad más abajo). Para
+        -- "individual" esta unidad en realidad vive en
+        -- RECETAS.rendimiento_unidad (vía receta_id) y esta columna no
+        -- se usa; para "elaborado" (incluyendo los recuperables de
+        -- merma dados de alta con ProductoService.crear_recuperable())
+        -- no hay receta propia, así que acá se guarda explícitamente.
+        unidad_base VARCHAR(30) NULL DEFAULT 'unidad',
         FOREIGN KEY (receta_id) REFERENCES RECETAS(id_receta) ON DELETE SET NULL,
         FOREIGN KEY (producto_padre_id) REFERENCES PRODUCTOS(id_producto) ON DELETE SET NULL
     )
@@ -141,6 +150,15 @@ SCHEMA_OPERACIONES = [
         id_ingrediente INT NULL,
         id_producto_componente INT NULL,
         cantidad_necesaria DECIMAL(10,4) NOT NULL,
+        -- Unidad en la que el usuario cargó cantidad_necesaria (ej. "g",
+        -- "ml", "unidad"). Puede diferir de la unidad base del
+        -- ingrediente/producto (ej. cargar "0.5 kg" para un ingrediente
+        -- que se guarda en "g"), siempre que sea de la misma magnitud;
+        -- ProductoService la convierte a la unidad base antes de costear
+        -- y rechaza en validar() cualquier magnitud incompatible (ver
+        -- RecetasService.convertir_unidad, que ya resuelve esto mismo
+        -- para RECETA_INGREDIENTES y se reutiliza acá).
+        unidad VARCHAR(30) NULL,
         FOREIGN KEY (id_producto) REFERENCES PRODUCTOS(id_producto) ON DELETE CASCADE,
         FOREIGN KEY (id_ingrediente) REFERENCES INGREDIENTES(id_ingrediente) ON DELETE RESTRICT,
         FOREIGN KEY (id_producto_componente) REFERENCES PRODUCTOS(id_producto) ON DELETE RESTRICT
@@ -616,3 +634,4 @@ SCHEMA_OPERACIONES = [
     )
     """,
 ]
+

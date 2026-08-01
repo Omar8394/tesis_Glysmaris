@@ -57,6 +57,12 @@ class ProductoWizard(ft.Container):
         ("combo", "Combo", "Conjunto de productos vendidos como una sola unidad", ft.icons.SHOPPING_BASKET_OUTLINED),
     ]
 
+    # Mismas etiquetas que reconoce RecetasService.UNIDADES_CANONICAS (una
+    # por categoría, para no saturar el selector) -- así lo que se elige
+    # acá siempre puede convertirse contra la unidad nativa del
+    # ingrediente/producto en ProductoService.
+    UNIDADES_COMPONENTE = ["g", "kg", "ml", "l", "cucharada", "cucharadita", "taza", "unidad", "docena"]
+
     PASOS_INDIVIDUAL = ["Información", "Costos", "Presentaciones", "Resumen"]
     PASOS_ELABORADO = ["Información", "Componentes", "Empaques", "Costos", "Resumen"]
     PASOS_COMBO = ["Información", "Productos", "Precio", "Resumen"]
@@ -323,6 +329,21 @@ class ProductoWizard(ft.Container):
             if datos.get("nombre_receta"):
                 self.autocompletado_receta.establecer(datos.get("nombre_receta"), id=datos.get("receta_id"))
             controles.append(self.autocompletado_receta)
+
+        if self.tipo == "elaborado":
+            # ✅ Un producto individual ya tiene una unidad "nativa" (la
+            # de su receta: rendimiento_unidad). Un elaborado no tiene
+            # receta propia, así que sin este campo no había forma de
+            # saber en qué unidad está expresado su costo cuando OTRO
+            # producto elaborado lo usa como componente (ver
+            # unidad_base / ProductoService._unidad_base_producto).
+            self.dd_unidad_base = Selector(
+                etiqueta="Unidad de este producto (para usarlo como componente de otro)",
+                opciones=self.UNIDADES_COMPONENTE,
+                valor=datos.get("unidad_base") or "unidad",
+                width=350,
+            )
+            controles.append(self.dd_unidad_base)
 
         controles.append(self.txt_descripcion)
         return TarjetaFormulario(
@@ -735,8 +756,20 @@ class ProductoWizard(ft.Container):
             width=120,
             keyboard_type=ft.KeyboardType.NUMBER,
         )
+        # ✅ Antes no había forma de indicar en qué unidad se cargaba la
+        # cantidad: siempre se asumía (en silencio) la unidad nativa del
+        # ingrediente/producto, así que cargar "0.5" para algo que se
+        # guarda en gramos significaba medio gramo, no medio kilo. Ahora
+        # el usuario elige la unidad y ProductoService la convierte (o
+        # rechaza el guardado si es de otra magnitud, ej. ml para algo
+        # en gramos).
+        self.dd_componente_unidad = Selector(
+            etiqueta="Unidad",
+            opciones=self.UNIDADES_COMPONENTE,
+            width=130,
+        )
         self.tabla_componentes = TablaSeleccion(
-            columnas=[("tipo", "Tipo"), ("nombre", "Nombre"), ("cantidad", "Cantidad")],
+            columnas=[("tipo", "Tipo"), ("nombre", "Nombre"), ("cantidad", "Cantidad"), ("unidad", "Unidad")],
         )
         self.tabla_componentes.reemplazar(self.componentes)
         boton_agregar = ft.IconButton(
@@ -746,10 +779,10 @@ class ProductoWizard(ft.Container):
         )
         return TarjetaFormulario(
             titulo="Componentes del producto",
-            subtitulo="Ingredientes, productos o subproductos que forman este artículo.",
+            subtitulo="Ingredientes, productos o subproductos que forman este artículo. La unidad debe ser coherente con la del componente (no se puede usar ml para algo que se guarda en gramos).",
             contenido=[
                 ft.Row(
-                    [self.dd_tipo_componente, self.autocompletado_componente, self.txt_componente_cantidad, boton_agregar],
+                    [self.dd_tipo_componente, self.autocompletado_componente, self.txt_componente_cantidad, self.dd_componente_unidad, boton_agregar],
                     spacing=AppSpacing.CONTROL_SPACING,
                     wrap=True,
                 ),
@@ -782,6 +815,7 @@ class ProductoWizard(ft.Container):
             "nombre": nombre,
             "id": id_componente,
             "cantidad": cantidad,
+            "unidad": self.dd_componente_unidad.value or "unidad",
         })
         self.tabla_componentes.reemplazar(self.componentes)
         self.autocompletado_componente.limpiar()
@@ -1266,6 +1300,7 @@ class ProductoWizard(ft.Container):
         elif self.tipo == "elaborado":
             datos["componentes"] = self.componentes
             datos["empaques"] = self.empaques
+            datos["unidad_base"] = getattr(self, "dd_unidad_base", None) and self.dd_unidad_base.value or "unidad"
             datos["margen_porcentaje"] = float(self.txt_margen.value or 40)
             datos["tiempo_preparacion_minutos"] = round(horas * 60, 2)
             datos["mano_obra"] = self._mano_obra_estimada(horas)

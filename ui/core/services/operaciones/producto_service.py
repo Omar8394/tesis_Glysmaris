@@ -105,6 +105,13 @@ class ProductoService(CRUDService):
         if not nombre:
             return ServiceResult.error("El nombre del recuperable es obligatorio.")
 
+        # ✅ Antes `unidad` solo se usaba para armar el texto de
+        # descripción y se perdía: no quedaba guardada en ningún campo
+        # consultable. Sin eso, un producto elaborado que usara este
+        # recuperable como componente no tenía con qué chequear
+        # coherencia de unidades (ver unidad_base más abajo y
+        # ProductoService._unidad_base_producto).
+        unidad = (unidad or "unidad").strip() or "unidad"
         datos = {
             "tipo": "elaborado",
             "nombre": nombre,
@@ -116,6 +123,7 @@ class ProductoService(CRUDService):
             "margen_porcentaje": 0,
             "mano_obra": 0,
             "costos_indirectos_monto": 0,
+            "unidad_base": unidad,
         }
         if costo_unitario:
             # No hay receta de la que calcular un costo, así que el
@@ -217,8 +225,13 @@ class ProductoService(CRUDService):
         if tipo == "individual" and not datos.get("id_receta"):
             return False, "Debe seleccionar una receta."
 
-        if tipo == "elaborado" and not datos.get("componentes"):
-            return False, "Debe agregar al menos un componente."
+        if tipo == "elaborado":
+            if not datos.get("componentes"):
+                return False, "Debe agregar al menos un componente."
+            for c in datos.get("componentes", []):
+                valido_unidad, mensaje_unidad = self._validar_unidad_componente(c)
+                if not valido_unidad:
+                    return False, mensaje_unidad
 
         if tipo == "combo":
             if not datos.get("productos_combo"):
@@ -406,10 +419,96 @@ class ProductoService(CRUDService):
         )
         return round(total, 2)
 
+    # ============================================================
+    # UNIDADES DE COMPONENTES (coherencia de magnitud + conversión)
+    # ============================================================
+    # No se permite usar, p.ej., "ml" para un componente que se guarda
+    # en gramos: mezclar masa con volumen depende de la densidad de
+    # cada ingrediente/producto y es fuente de errores de costeo. La
+    # conversión real (y el diccionario de unidades reconocidas) ya
+    # vive en RecetasService -- se reutiliza acá en vez de duplicarla,
+    # así "0.5 kg" en un componente y "500 g" en una receta convierten
+    # exactamente igual.
+
+    def _unidad_base_ingrediente(self, id_ingrediente) -> Optional[str]:
+        if not self._ingredientes or not id_ingrediente:
+            return None
+        res = self._ingredientes.obtener(id_ingrediente)
+        if res.exito:
+            return res.datos.get("unidad_medida")
+        return None
+
+    def _unidad_base_producto(self, datos_producto: dict) -> str:
+        """
+        Unidad "nativa" de un producto para poder usarse como
+        referencia de coherencia: la de su receta (rendimiento_unidad)
+        si es individual, o unidad_base si es elaborado/recuperable
+        (no tiene receta propia). 'unidad' como último respaldo, para
+        productos guardados antes de que existiera esta columna.
+        """
+        return (
+            datos_producto.get("rendimiento_unidad")
+            or datos_producto.get("unidad_base")
+            or "unidad"
+        )
+
+    def _unidad_objetivo_componente(self, tipo_c: str, id_c) -> Optional[str]:
+        """Unidad nativa del componente (ingrediente o producto), o
+        None si no se pudo determinar (componente inexistente, o sin
+        servicio de ingredientes conectado)."""
+        if tipo_c == "ingrediente":
+            return self._unidad_base_ingrediente(id_c)
+        if tipo_c in ("producto", "subproducto"):
+            res = self.obtener(id_c)
+            if res.exito:
+                return self._unidad_base_producto(res.datos)
+        return None
+
+    def _validar_unidad_componente(self, c: dict) -> tuple[bool, str]:
+        unidad_c = (c.get("unidad") or "").strip()
+        if not unidad_c:
+            # Sin unidad especificada: no se puede chequear coherencia,
+            # pero no se bloquea el guardado (compatibilidad con datos
+            # cargados antes de que el wizard pidiera esta unidad).
+            return True, ""
+
+        unidad_objetivo = self._unidad_objetivo_componente(c.get("tipo"), c.get("id"))
+        if not unidad_objetivo:
+            return True, ""
+
+        try:
+            self._recetas.convertir_unidad(1, unidad_c, unidad_objetivo)
+        except AttributeError:
+            # self._recetas no expone convertir_unidad (mock de test u
+            # otra implementación) -- no bloquear por eso.
+            return True, ""
+        except ValueError as e:
+            nombre = c.get("nombre") or "componente"
+            return False, f"Unidad no válida en '{nombre}': {e}"
+
+        return True, ""
+
+    def _convertir_cantidad_componente(self, cantidad: float, unidad_origen: Optional[str], unidad_destino: Optional[str]) -> float:
+        """
+        Convierte `cantidad` a la unidad nativa del componente antes de
+        aplicar el costo por unidad. Si falta alguna unidad, son
+        iguales, o la conversión no es posible (magnitud distinta, o
+        unidad no reconocida), devuelve la cantidad tal cual: la
+        incoherencia real ya se bloquea antes en validar(); acá no se
+        quiere romper calcular_preview() (que llama a
+        _calcular_y_normalizar() sin pasar por validar()).
+        """
+        if not unidad_origen or not unidad_destino or unidad_origen == unidad_destino:
+            return cantidad
+        try:
+            return self._recetas.convertir_unidad(cantidad, unidad_origen, unidad_destino)
+        except (ValueError, AttributeError):
+            return cantidad
+
     def _calcular_costo_componentes(self, componentes: list[dict]) -> float:
         """
         `componentes` es [{"tipo": "ingrediente"|"producto"|"subproducto",
-        "id": int, "cantidad": float}].
+        "id": int, "cantidad": float, "unidad": str|None}].
 
         ⚠️ REGLA CLAVE (ver documento de requerimientos de Producto
         Elaborado): cuando el componente es un producto (individual o
@@ -424,7 +523,8 @@ class ProductoService(CRUDService):
         con el margen/mano de obra/empaque ya cobrados en ese producto.
 
         Por tipo de componente:
-          - "ingrediente": costo_unitario del lote x cantidad_usada.
+          - "ingrediente": costo_unitario del lote x cantidad_usada
+            (convertida a la unidad_medida del ingrediente).
           - "producto" (individual o elaborado, sin distinguirse en el
             schema): costo_receta / rendimiento_cantidad x cantidad_usada.
             costo_receta es, para ambos casos, el costo de materia prima
@@ -436,16 +536,20 @@ class ProductoService(CRUDService):
             propio, así que no hay rendimiento_cantidad de RECETAS que
             aplicar), se usa costo_receta directamente como costo
             unitario, tal como indica el documento para ese caso ("se
-            usa directamente el costo total de su receta").
+            usa directamente el costo total de su receta"). La cantidad
+            se convierte a la unidad nativa del producto (rendimiento_
+            unidad o unidad_base) antes de multiplicar.
           - "subproducto" (merma recuperable dada de alta como producto
             vía crear_recuperable()): ya tiene un precio_final que ES su
             costo por unidad (costo_asociado / cantidad_recuperada, sin
             margen ni mano de obra agregados). Se usa precio_final x
-            cantidad_usada directamente, sin dividir por rendimiento.
+            cantidad_usada directamente (convertida a su unidad_base),
+            sin dividir por rendimiento.
         """
         total = 0.0
         for c in componentes or []:
             cantidad = float(c.get("cantidad", 0) or 0)
+            unidad_c = c.get("unidad")
             tipo_c = c.get("tipo")
             id_c = c.get("id")
 
@@ -454,7 +558,9 @@ class ProductoService(CRUDService):
                     continue
                 res = self._ingredientes.obtener(id_c)
                 if res.exito:
-                    total += cantidad * float(res.datos.get("costo_unitario", 0))
+                    unidad_ingrediente = res.datos.get("unidad_medida")
+                    cantidad_convertida = self._convertir_cantidad_componente(cantidad, unidad_c, unidad_ingrediente)
+                    total += cantidad_convertida * float(res.datos.get("costo_unitario", 0))
 
             elif tipo_c == "producto":
                 res = self.obtener(id_c)
@@ -462,12 +568,16 @@ class ProductoService(CRUDService):
                     costo_receta = float(res.datos.get("costo_receta", 0) or 0)
                     rendimiento = float(res.datos.get("rendimiento_cantidad", 0) or 0)
                     costo_unitario = (costo_receta / rendimiento) if rendimiento > 0 else costo_receta
-                    total += cantidad * costo_unitario
+                    unidad_objetivo = self._unidad_base_producto(res.datos)
+                    cantidad_convertida = self._convertir_cantidad_componente(cantidad, unidad_c, unidad_objetivo)
+                    total += cantidad_convertida * costo_unitario
 
             elif tipo_c == "subproducto":
                 res = self.obtener(id_c)
                 if res.exito:
-                    total += cantidad * float(res.datos.get("precio_final", 0))
+                    unidad_objetivo = self._unidad_base_producto(res.datos)
+                    cantidad_convertida = self._convertir_cantidad_componente(cantidad, unidad_c, unidad_objetivo)
+                    total += cantidad_convertida * float(res.datos.get("precio_final", 0))
 
         return round(total, 2)
 

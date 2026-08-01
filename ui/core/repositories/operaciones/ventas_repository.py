@@ -19,29 +19,36 @@ class VentaRepository(CRUDRepository):
     # Catálogo disponible para vender (agregado por producto)
     # ------------------------------------------------------------
     def listar_productos_disponibles(self) -> List[Dict]:
-        """
-        Stock vendible real = suma de (cantidad_obtenida - cantidad_vendida)
-        de los lotes de producción finalizados y marcados disponible_venta.
-        """
-        cursor = self._cursor()
-        cursor.execute("""
-            SELECT
-                p.id_producto,
-                p.nombre_producto AS nombre,
-                p.categoria,
-                p.precio_venta,
-                SUM(pd.cantidad_obtenida - pd.cantidad_vendida) AS stock_actual
-            FROM PRODUCCION_DETALLE pd
-            JOIN PRODUCCION_ORDENES po ON po.id_orden = pd.id_orden
-            JOIN PRODUCTOS p ON p.id_producto = pd.id_producto
-            WHERE pd.disponible_venta = TRUE
-              AND po.estado = 'finalizada'
-              AND (pd.cantidad_obtenida - pd.cantidad_vendida) > 0
-              AND p.activo = TRUE
-            GROUP BY p.id_producto, p.nombre_producto, p.categoria, p.precio_venta
-            HAVING stock_actual > 0
-        """)
-        return cursor.fetchall()
+        try:
+            cursor = self._cursor()
+            cursor.execute("""
+                SELECT
+                    p.id_producto,
+                    p.nombre_producto AS nombre,
+                    p.categoria,
+                    p.precio_final AS precio_venta,
+                    SUM(pd.cantidad_obtenida - pd.cantidad_vendida) AS stock_actual
+                FROM PRODUCCION_DETALLE pd
+                JOIN PRODUCCION_ORDENES po ON po.id_orden = pd.id_orden
+                JOIN PRODUCTOS p ON p.id_producto = pd.id_producto
+                WHERE pd.disponible_venta = TRUE
+                AND po.estado = 'finalizada'
+                AND (pd.cantidad_obtenida - pd.cantidad_vendida) > 0
+                AND p.activo = TRUE
+                GROUP BY p.id_producto, p.nombre_producto, p.categoria, p.precio_final
+                HAVING stock_actual > 0
+            """)
+            resultados = cursor.fetchall()
+            # Convertir Decimal a float para evitar problemas en la vista
+            for row in resultados:
+                if 'precio_venta' in row and row['precio_venta'] is not None:
+                    row['precio_venta'] = float(row['precio_venta'])
+            return resultados
+        except Exception as e:
+            print(f"Error en listar_productos_disponibles: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
 
     def obtener_lotes_disponibles(self, id_producto: int) -> List[Dict]:
         """Lotes con stock, ordenados FIFO (más antiguo primero)."""
@@ -67,6 +74,8 @@ class VentaRepository(CRUDRepository):
         cabecera: Dict[str, Any],
         items: List[Dict[str, Any]],
         pagos: List[Dict[str, Any]],
+        id_cliente: Optional[int] = None,
+        fecha_vencimiento: Optional[str] = None,
     ) -> int:
         """
         cabecera: cliente_nombre, cliente_cedula, cliente_telefono,
@@ -75,6 +84,15 @@ class VentaRepository(CRUDRepository):
                    cantidad, precio_unitario, subtotal,
                    agregados: [{id_activo, nombre_activo, cantidad, costo_unitario, subtotal}]
         pagos:    metodo_pago, monto, referencia
+        id_cliente: CLIENTES.id_cliente ya resuelto/creado por VentaService,
+                   para enlazar la deuda (si la hay) con el cliente real.
+        fecha_vencimiento: opcional, plazo de la deuda si algún pago es a crédito.
+
+        Si entre `pagos` hay uno o más con metodo_pago = 'credito', al
+        cerrar la venta se crea automáticamente la fila correspondiente
+        en CUENTAS_POR_COBRAR (por el monto a crédito), dentro de la
+        misma transacción, para que quede un historial de deuda ligado
+        a esta venta y a este cliente.
         """
         cursor = self._cursor()
         try:
@@ -133,6 +151,22 @@ class VentaRepository(CRUDRepository):
                     INSERT INTO VENTA_PAGOS (id_venta, metodo_pago, monto, referencia)
                     VALUES (%s,%s,%s,%s)
                 """, (id_venta, pago['metodo_pago'], pago['monto'], pago.get('referencia')))
+
+            monto_credito = sum(
+                p['monto'] for p in pagos if p.get('metodo_pago') == 'credito'
+            )
+            if monto_credito > 0:
+                cursor.execute("""
+                    INSERT INTO CUENTAS_POR_COBRAR
+                        (id_venta, id_cliente, monto_total, monto_abonado,
+                         monto_pendiente, estado, fecha_venta,
+                         fecha_vencimiento, observaciones)
+                    VALUES
+                        (%s, %s, %s, 0, %s, 'pendiente', NOW(), %s, %s)
+                """, (
+                    id_venta, id_cliente, monto_credito, monto_credito,
+                    fecha_vencimiento, cabecera.get('observaciones'),
+                ))
 
             self._commit()
             return id_venta

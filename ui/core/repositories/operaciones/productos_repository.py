@@ -52,6 +52,7 @@ class ProductoRepository(CRUDRepository):
         p.precio_final,
         p.precio_combo,
         p.descuento_combo,
+        p.unidad_base,
         p.activo
     """
 
@@ -68,8 +69,8 @@ class ProductoRepository(CRUDRepository):
             (nombre_producto, tipo_producto, categoria, receta_id, descripcion_producto,
              costo_receta, mano_obra, empaques, costos_indirectos,
              costo_total, margen_porcentaje, precio_sugerido, precio_final,
-             precio_combo, descuento_combo, activo)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE)
+             precio_combo, descuento_combo, unidad_base, activo)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE)
         """
         cursor = self._cursor()
         cursor.execute(query, self._valores_principales(datos))
@@ -85,7 +86,7 @@ class ProductoRepository(CRUDRepository):
                 descripcion_producto=%s, costo_receta=%s, mano_obra=%s,
                 empaques=%s, costos_indirectos=%s,
                 costo_total=%s, margen_porcentaje=%s, precio_sugerido=%s, precio_final=%s,
-                precio_combo=%s, descuento_combo=%s
+                precio_combo=%s, descuento_combo=%s, unidad_base=%s
             WHERE id_producto=%s
         """
         cursor = self._cursor()
@@ -118,6 +119,10 @@ class ProductoRepository(CRUDRepository):
             datos.get("precio_final", 0),
             datos.get("precio_combo") if tipo == "combo" else None,
             datos.get("descuento_combo", 0) if tipo == "combo" else 0,
+            # Solo tiene sentido para "elaborado" (incluye recuperables):
+            # "individual" ya tiene su unidad en RECETAS.rendimiento_unidad
+            # y "combo" no se usa nunca como componente de otro producto.
+            (datos.get("unidad_base") or "unidad") if tipo == "elaborado" else None,
         )
 
     # ============================================================
@@ -188,10 +193,10 @@ class ProductoRepository(CRUDRepository):
             cursor.execute(
                 """
                 INSERT INTO PRODUCTO_COMPONENTES
-                    (id_producto, tipo_componente, id_ingrediente, id_producto_componente, cantidad_necesaria)
-                VALUES (%s, %s, %s, %s, %s)
+                    (id_producto, tipo_componente, id_ingrediente, id_producto_componente, cantidad_necesaria, unidad)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 """,
-                (id_producto, tipo_c, id_ingrediente, id_producto_componente, c.get("cantidad", 0)),
+                (id_producto, tipo_c, id_ingrediente, id_producto_componente, c.get("cantidad", 0), c.get("unidad")),
             )
 
     def _guardar_activos(self, id_producto: int, empaques: List[Dict], costos_indirectos: List[Dict]):
@@ -285,11 +290,19 @@ class ProductoRepository(CRUDRepository):
             SELECT
                 pc.tipo_componente AS tipo,
                 pc.cantidad_necesaria AS cantidad,
+                pc.unidad,
                 COALESCE(pc.id_ingrediente, pc.id_producto_componente) AS id,
-                COALESCE(i.nombre_ingrediente, pr.nombre_producto) AS nombre
+                COALESCE(i.nombre_ingrediente, pr.nombre_producto) AS nombre,
+                -- Unidad "nativa" del componente, para validar/mostrar
+                -- coherencia de magnitudes en la UI: la del ingrediente,
+                -- o la de la receta del producto individual referenciado
+                -- (rendimiento_unidad), o unidad_base si es un producto
+                -- elaborado/recuperable (sin receta propia).
+                COALESCE(i.unidad_medida, r2.rendimiento_unidad, pr.unidad_base) AS unidad_referencia
             FROM PRODUCTO_COMPONENTES pc
             LEFT JOIN INGREDIENTES i ON pc.id_ingrediente = i.id_ingrediente
             LEFT JOIN PRODUCTOS pr ON pc.id_producto_componente = pr.id_producto
+            LEFT JOIN RECETAS r2 ON pr.receta_id = r2.id_receta
             WHERE pc.id_producto=%s
             """,
             (id_producto,),

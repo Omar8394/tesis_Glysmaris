@@ -16,9 +16,13 @@ from ui.core.services.base.service_result import ServiceResult
 
 class VentaService(CRUDService):
 
-    def __init__(self, repository):
+    def __init__(self, repository, cliente_service=None):
         super().__init__()
         self._repo = repository
+        # Necesario para resolver/crear CLIENTES.id_cliente y así poder
+        # enlazar la venta con el cliente y, si es a crédito, con
+        # CUENTAS_POR_COBRAR. Ver validación en finalizar_venta().
+        self._cliente_service = cliente_service
 
     # ------------------------------------------------------------
     def listar_productos_disponibles(self) -> List[Dict]:
@@ -31,12 +35,40 @@ class VentaService(CRUDService):
         pagos: List[Dict[str, Any]],
         cliente: Optional[Dict[str, Any]] = None,
         usuario: Optional[str] = None,
+        fecha_vencimiento: Optional[str] = None,
     ) -> ServiceResult:
         cliente = cliente or {}
 
         valido, mensaje = self._validar_carrito(carrito)
         if not valido:
             return ServiceResult.error(mensaje)
+
+        monto_credito = sum(
+            p.get('monto', 0) for p in pagos if p.get('metodo_pago') == 'credito'
+        )
+
+        # Una venta a crédito sin cliente identificado es una deuda que
+        # nadie puede cobrar: se exige nombre (mínimo) antes de continuar.
+        if monto_credito > 0 and not (cliente.get('nombre') or '').strip():
+            return ServiceResult.error(
+                "Para una venta a crédito debes registrar al menos el nombre del cliente."
+            )
+
+        # Enlaza (o crea) el cliente en CLIENTES cuando se capturó algún
+        # dato suyo, para que la venta y, si aplica, la deuda queden
+        # trazables hacia CLIENTES.id_cliente y no solo como texto suelto.
+        id_cliente = None
+        if self._cliente_service and (cliente.get('nombre') or cliente.get('cedula')):
+            registro_cliente = self._cliente_service.obtener_o_crear_por_cedula(
+                cedula=cliente.get('cedula', ''),
+                nombre=cliente.get('nombre', ''),
+                telefono=cliente.get('telefono', ''),
+            )
+            id_cliente = registro_cliente.get('id_cliente')
+        elif monto_credito > 0 and not self._cliente_service:
+            return ServiceResult.error(
+                "No se puede registrar una venta a crédito: falta configurar ClienteService."
+            )
 
         items = []
         subtotal_general = 0.0
@@ -92,7 +124,11 @@ class VentaService(CRUDService):
         }
 
         try:
-            id_venta = self._repo.crear_venta_completa(cabecera, items, pagos)
+            id_venta = self._repo.crear_venta_completa(
+                cabecera, items, pagos,
+                id_cliente=id_cliente,
+                fecha_vencimiento=fecha_vencimiento,
+            )
             return ServiceResult.ok("Venta registrada correctamente.", datos={'id_venta': id_venta})
         except ValueError as e:
             # Stock insuficiente, etc.
