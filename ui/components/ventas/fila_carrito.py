@@ -31,7 +31,7 @@ class FilaCarrito(ft.Container):
             value=str(self.cantidad),
             width=60,
             keyboard_type=ft.KeyboardType.NUMBER,
-            on_change=self._cambiar_cantidad
+            on_change=self._cambiar_cantidad,
         )
 
         self.subtotal = ft.Text(f"${producto['precio_venta'] * cantidad:.2f}", weight="bold")
@@ -73,10 +73,26 @@ class FilaCarrito(ft.Container):
         ])
 
     def _cambiar_cantidad(self, e):
+        texto = (self.campo_cantidad.value or "").strip()
+
+        # Mientras el campo está vacío o en 0 (por ejemplo, a mitad de
+        # borrar un dígito para escribir uno nuevo) NO se notifica al
+        # carrito. Si lo hiciéramos, on_cantidad_changed vería 0 y
+        # eliminaría la fila del carrito antes de que el usuario termine
+        # de corregir el número. Para eliminar un producto está el botón
+        # de la ❌; el campo de cantidad ya no borra por sí solo.
+        if texto == "":
+            return
+
         try:
-            nueva = int(self.campo_cantidad.value or 0)
+            nueva = int(texto)
         except ValueError:
-            nueva = 0
+            return
+
+        if nueva <= 0:
+            return
+
+        self.cantidad = nueva
         self.on_cantidad_changed(self.index, nueva)
 
     def _toggle_agregados(self, e):

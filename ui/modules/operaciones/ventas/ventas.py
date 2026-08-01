@@ -21,7 +21,8 @@ class VentasView(ft.Row):
         on_continuar_cobro,
         on_finalizar_venta,
         productos_disponibles,
-        activos_disponibles
+        activos_disponibles,
+        buscar_clientes=None,
     ):
         super().__init__(expand=True, spacing=0)
 
@@ -31,6 +32,7 @@ class VentasView(ft.Row):
         self.on_abrir_agregados = on_abrir_agregados
         self.on_continuar_cobro = on_continuar_cobro
         self.on_finalizar_venta = on_finalizar_venta
+        self.buscar_clientes = buscar_clientes
 
         self.productos_disponibles = productos_disponibles
         self.activos_disponibles = activos_disponibles
@@ -86,7 +88,8 @@ class VentasView(ft.Row):
         panel_pago = PanelPago(
             total=total,
             on_finalizar=self.on_finalizar_venta,
-            on_volver=lambda: self.mostrar_carrito()
+            on_volver=lambda: self.mostrar_carrito(),
+            buscar_clientes=self.buscar_clientes,
         )
         self.controls[1].content = panel_pago
         self.update()

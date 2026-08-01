@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from ui.core.services.base.crud_service import CRUDService
-from ui.core.repositories.cliente_repository import ClienteRepository
+from ui.core.repositories.operaciones.cliente_repository import ClienteRepository
 
 
 class ClienteService(CRUDService):

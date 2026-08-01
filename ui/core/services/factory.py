@@ -27,6 +27,10 @@ from ui.core.repositories.operaciones.estadisticas_repository import Estadistica
 from ui.core.services.operaciones.estadisticas_service import EstadisticasService
 from ui.core.repositories.operaciones.ventas_repository import VentaRepository
 from ui.core.services.operaciones.ventas_service import VentaService
+from ui.core.repositories.operaciones.cliente_repository import ClienteRepository
+from ui.core.services.operaciones.cliente_service import ClienteService
+from ui.core.repositories.operaciones.cuenta_cobrar_repository import CuentaPorCobrarRepository
+from ui.core.services.operaciones.cuenta_cobrar_service import CuentaPorCobrarService
 
 class ServiceFactory:
     """Crea y cachea servicios."""
@@ -96,8 +100,25 @@ class ServiceFactory:
         if "venta" not in cls._instances:
             db = DatabaseFactory.get_operaciones()
             repo = VentaRepository(db)
-            cls._instances["venta"] = VentaService(repo)
+            cliente_service = cls.get_cliente_service()
+            cls._instances["venta"] = VentaService(repo, cliente_service=cliente_service)
         return cls._instances["venta"]
+
+    @classmethod
+    def get_cliente_service(cls) -> ClienteService:
+        if "cliente" not in cls._instances:
+            db = DatabaseFactory.get_operaciones()
+            repo = ClienteRepository(db)
+            cls._instances["cliente"] = ClienteService(repo)
+        return cls._instances["cliente"]
+
+    @classmethod
+    def get_cuenta_por_cobrar_service(cls) -> CuentaPorCobrarService:
+        if "cuenta_por_cobrar" not in cls._instances:
+            db = DatabaseFactory.get_operaciones()
+            repo = CuentaPorCobrarRepository(db)
+            cls._instances["cuenta_por_cobrar"] = CuentaPorCobrarService(repo)
+        return cls._instances["cuenta_por_cobrar"]
 
     @classmethod
     def get_estadisticas_service(cls) -> EstadisticasService:

@@ -19,7 +19,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from ui.core.services.base.crud_service import CRUDService
-from ui.core.repositories.cuenta_cobrar_repository import CuentaPorCobrarRepository
+from ui.core.repositories.operaciones.cuenta_cobrar_repository import CuentaPorCobrarRepository
 
 
 class CuentaPorCobrarService(CRUDService):

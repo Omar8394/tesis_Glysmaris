@@ -13,7 +13,13 @@ class CarritoPanel(ft.Column):
         on_continuar_cobro,
         activos_disponibles
     ):
-        super().__init__(expand=True, spacing=AppSpacing.CONTROL_SPACING)
+        super().__init__(
+            expand=True,
+            spacing=AppSpacing.CONTROL_SPACING,
+            # STRETCH: los hijos ocupan todo el ancho disponible de la
+            # Column (eje transversal), sin tocar su alto (eje principal).
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+        )
         self.on_cambiar_cantidad = on_cambiar_cantidad
         self.on_eliminar = on_eliminar
         self.on_abrir_agregados = on_abrir_agregados
@@ -32,8 +38,7 @@ class CarritoPanel(ft.Column):
             texto="Continuar al cobro",
             icono=ft.icons.PAYMENT,
             on_click=self._continuar,
-            expand=True,
-            width=None,
+            height=45,
             disabled=True  # Se habilita cuando hay productos
         )
 

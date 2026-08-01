@@ -9,6 +9,19 @@ from ui.modules.operaciones.ventas.ventas import VentasView
 from ui.core.services.factory import ServiceFactory
 from ui.components.mensajes import MensajeSistema
 
+# Traduce el texto que muestra PanelPago al valor exacto que espera el
+# ENUM de VENTA_PAGOS.metodo_pago en la base de datos. Sin esto, la
+# detección de pagos a crédito en VentaService/VentaRepository nunca
+# coincide (compara contra 'credito' en minúsculas) y la venta falla
+# o, peor, se guarda sin generar la cuenta por cobrar.
+MAPA_METODOS_PAGO = {
+    "Efectivo": "efectivo",
+    "Débito": "debito",
+    "Crédito": "credito",
+    "Transferencia": "transferencia",
+    "Pago móvil": "pago_movil",
+}
+
 
 class VentasModule(Module):
     """
@@ -22,8 +35,7 @@ class VentasModule(Module):
         self.content_area = content_area
         self.venta_service = ServiceFactory.get_venta_service()
         self.activo_service = ServiceFactory.get_activo_service()
-        # Si tienes cliente_service, descomenta la siguiente línea
-        # self.cliente_service = ServiceFactory.get_cliente_service()
+        self.cliente_service = ServiceFactory.get_cliente_service()
 
         # Estado del carrito
         self.carrito = []  # cada item: {producto, cantidad, agregados, personalizado}
@@ -112,22 +124,34 @@ class VentasModule(Module):
         total = self._calcular_total()
         self.view.mostrar_panel_pago(total)
 
-    def finalizar_venta(self, datos_pago: dict):
+    def finalizar_venta(self, datos: dict):
         """
         Finaliza la venta: persiste en base de datos vía VentaService
-        (que valida el carrito, arma el detalle y descuenta stock FIFO),
-        y limpia el carrito si todo sale bien.
+        (que valida el carrito, arma el detalle, descuenta stock FIFO,
+        resuelve/crea el cliente y, si hay pago a crédito, genera la
+        cuenta por cobrar correspondiente), y limpia el carrito si todo
+        sale bien.
+
+        `datos` llega desde PanelPago con la forma:
+            {"pagos": {"Efectivo": 10.0, "Crédito": 5.0},
+             "cliente": {"nombre": ..., "cedula": ..., "telefono": ...} | None,
+             "fecha_vencimiento": "YYYY-MM-DD" | None}
         """
+        datos_pago = datos.get("pagos", {})
+        cliente = datos.get("cliente")
+        fecha_vencimiento = datos.get("fecha_vencimiento")
+
         pagos = [
-            {'metodo_pago': metodo, 'monto': monto}
+            {'metodo_pago': MAPA_METODOS_PAGO.get(metodo, metodo), 'monto': monto}
             for metodo, monto in datos_pago.items()
         ]
 
         resultado = self.venta_service.finalizar_venta(
             carrito=self.carrito,
             pagos=pagos,
-            cliente=None,
+            cliente=cliente,
             usuario=self.usuario,
+            fecha_vencimiento=fecha_vencimiento,
         )
 
         if resultado.exito:
@@ -135,6 +159,12 @@ class VentasModule(Module):
             self.carrito.clear()
             self.view.mostrar_carrito()
             self.view.actualizar_carrito(self.carrito)
+            # El stock ya se descontó en la base de datos (FIFO, dentro de
+            # la misma transacción de la venta); sin esto, las tarjetas
+            # del catálogo se quedan mostrando el stock viejo hasta que
+            # se recargue el módulo desde cero.
+            self.productos_disponibles = self._cargar_productos()
+            self.view.actualizar_catalogo(self.productos_disponibles)
         else:
             MensajeSistema.error(self.page, resultado.mensaje)
 
@@ -174,5 +204,6 @@ class VentasModule(Module):
             on_finalizar_venta=self.finalizar_venta,
             productos_disponibles=self.productos_disponibles,
             activos_disponibles=self.activos_disponibles,
+            buscar_clientes=self.cliente_service.buscar,
         )
         return self.view

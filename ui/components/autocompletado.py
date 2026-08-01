@@ -40,6 +40,8 @@ class AutoCompletado(ft.UserControl):
 
         seleccionar: Callable[[str], None] | None = None,
 
+        on_change: Callable[[str], None] | None = None,
+
         width=320,
 
         max_sugerencias=8,
@@ -53,6 +55,11 @@ class AutoCompletado(ft.UserControl):
         self.buscar = buscar
 
         self.seleccionar = seleccionar
+
+        # Notifica cada vez que cambia el texto del campo (escritura
+        # libre) o se elige algo de la lista de sugerencias. Distinto de
+        # `seleccionar`, que solo dispara al elegir un ítem de la lista.
+        self.on_change = on_change
 
         self.max_sugerencias = max_sugerencias
 
@@ -101,6 +108,9 @@ class AutoCompletado(ft.UserControl):
         # El usuario está editando el texto a mano: ya no vale la
         # selección (ni el id) que pudiera haber de antes.
         self._seleccionado = None
+
+        if self.on_change:
+            self.on_change(texto)
 
         if not texto:
 
@@ -165,6 +175,10 @@ class AutoCompletado(ft.UserControl):
         if self.seleccionar:
 
             self.seleccionar(valor)
+
+        if self.on_change:
+
+            self.on_change(self.campo.value)
 
         self.update()
 

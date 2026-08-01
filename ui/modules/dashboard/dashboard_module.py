@@ -34,7 +34,7 @@ from ui.modules.operaciones.produccion.produccion import produccion_view
 from ui.modules.operaciones.activos.mi_negocio import mi_negocio_view
 from ui.modules.operaciones.ventas.ventas import ventas_view
 from ui.modules.operaciones.estadisticas.estadisticas import estadisticas_view
-
+from ui.modules.operaciones.cuentas_por_cobrar.cuentas_por_cobrar import cuentas_por_cobrar_view
 
 class DashboardModule:
 
@@ -96,6 +96,7 @@ class DashboardModule:
             ("Mi Negocio", ft.icons.STORE_OUTLINED, self._ir_mi_negocio),
             ("Producción", AppIcons.FATORY, self._ir_produccion),
             ("Ventas", AppIcons.SALES, self._ir_ventas),
+            ("Cuentas por Cobrar", ft.icons.ACCOUNT_BALANCE_WALLET_ROUNDED, self._ir_cuentas_por_cobrar),
             ("Estadísticas", ft.icons.BAR_CHART_ROUNDED, self._ir_estadisticas),
             ("Cerrar Sesión", AppIcons.LOGOUT, self._logout),
         ]
@@ -204,6 +205,13 @@ class DashboardModule:
 
     def _ir_ventas(self, e=None) -> None:
         layout, module = ventas_view(self.page, self.content_area)
+        self.content_area.content = layout
+        self.content_area.update()
+        if hasattr(module, 'cargar') and callable(module.cargar):
+            module.cargar()
+
+    def _ir_cuentas_por_cobrar(self, e=None):
+        layout, module = cuentas_por_cobrar_view(self.page, self.content_area)
         self.content_area.content = layout
         self.content_area.update()
         if hasattr(module, 'cargar') and callable(module.cargar):

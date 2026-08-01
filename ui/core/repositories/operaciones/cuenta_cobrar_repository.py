@@ -93,7 +93,12 @@ class CuentaPorCobrarRepository(CRUDRepository):
     def listar(self) -> List[Dict]:
         cursor = self._cursor()
         cursor.execute(
-            "SELECT * FROM CUENTAS_POR_COBRAR ORDER BY fecha_venta DESC"
+            """
+            SELECT cc.*, cl.nombre AS cliente_nombre, cl.telefono AS cliente_telefono
+            FROM CUENTAS_POR_COBRAR cc
+            LEFT JOIN CLIENTES cl ON cl.id_cliente = cc.id_cliente
+            ORDER BY cc.fecha_venta DESC
+            """
         )
         return cursor.fetchall()
 
@@ -102,7 +107,7 @@ class CuentaPorCobrarRepository(CRUDRepository):
         patron = f"%{texto}%"
         cursor.execute(
             """
-            SELECT cc.*
+            SELECT cc.*, cl.nombre AS cliente_nombre, cl.telefono AS cliente_telefono
             FROM CUENTAS_POR_COBRAR cc
             LEFT JOIN CLIENTES cl ON cl.id_cliente = cc.id_cliente
             WHERE cl.nombre LIKE %s OR cl.cedula LIKE %s
