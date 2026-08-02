@@ -38,9 +38,6 @@ class EstadisticasRepository(Repository):
     DETALLE_VENTA, PRODUCTOS y PRODUCCION_MERMAS.
     """
 
-    def __init__(self, conexion):
-        super().__init__(conexion)
-
     # ------------------------------------------------------------------
     # Rendimiento de productos
     # ------------------------------------------------------------------
@@ -70,13 +67,9 @@ class EstadisticasRepository(Repository):
             LIMIT %s
         """
 
-        cursor = self._conexion.cursor(dictionary=True)
-
-        try:
-            cursor.execute(sql, (dias, limite))
-            return cursor.fetchall()
-        finally:
-            cursor.close()
+        cursor = self._cursor()
+        cursor.execute(sql, (dias, limite))
+        return cursor.fetchall()
 
     # ------------------------------------------------------------------
     # Minería de temporadas (datos crudos, sin clasificar)
@@ -96,9 +89,11 @@ class EstadisticasRepository(Repository):
                 p.nombre_producto,
                 SUM(
                     CASE WHEN MONTH(v.fecha_venta) = MONTH(CURRENT_DATE)
+                     AND YEAR(v.fecha_venta) = YEAR(CURRENT_DATE)
                     THEN dv.cantidad ELSE 0 END
                 ) AS ventas_mes_actual,
-                SUM(dv.cantidad) AS ventas_totales_anio
+                SUM(dv.cantidad) AS ventas_totales_anio,
+                COUNT(DISTINCT DATE_FORMAT(v.fecha_venta, '%Y-%m')) AS meses_con_ventas
             FROM DETALLE_VENTA dv
             JOIN VENTAS v ON v.id_venta = dv.id_venta
             JOIN PRODUCTOS p ON p.id_producto = dv.id_producto
@@ -108,13 +103,9 @@ class EstadisticasRepository(Repository):
             HAVING ventas_totales_anio > 0
         """
 
-        cursor = self._conexion.cursor(dictionary=True)
-
-        try:
-            cursor.execute(sql)
-            return cursor.fetchall()
-        finally:
-            cursor.close()
+        cursor = self._cursor()
+        cursor.execute(sql)
+        return cursor.fetchall()
 
     # ------------------------------------------------------------------
     # Mermas
@@ -138,10 +129,6 @@ class EstadisticasRepository(Repository):
             LIMIT %s
         """
 
-        cursor = self._conexion.cursor(dictionary=True)
-
-        try:
-            cursor.execute(sql, (limite,))
-            return cursor.fetchall()
-        finally:
-            cursor.close()
+        cursor = self._cursor()
+        cursor.execute(sql, (limite,))
+        return cursor.fetchall()

@@ -262,16 +262,18 @@ class ProduccionRepository(CRUDRepository):
         cursor = self._cursor()
         cursor.execute("""
             INSERT INTO PRODUCCION_MERMAS
-                (id_orden, id_detalle, id_producto, cantidad,
-                 tipo_merma, motivo, descripcion, costo_asociado)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (id_orden, id_detalle, id_producto, cantidad, unidad,
+                tipo_merma, motivo, nombre_recuperado, descripcion, costo_asociado)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             datos["id_orden"],
             datos.get("id_detalle"),
             datos.get("id_producto"),
             datos["cantidad"],
+            datos.get("unidad"),
             datos["tipo_merma"],
             datos["motivo"],
+            datos.get("nombre_recuperado"),
             datos.get("descripcion", ""),
             datos.get("costo_asociado", 0.0),
         ))
@@ -386,6 +388,17 @@ class ProduccionRepository(CRUDRepository):
         cursor = self._cursor()
         cursor.execute("SELECT * FROM PRODUCCION_COSTOS WHERE id_orden = %s", (id_orden,))
         return [dict(row) for row in cursor.fetchall()]
+
+    def actualizar_costo_calculado_detalle(self, id_detalle: int, costo_calculado: float) -> bool:
+        """Actualiza el costo real acumulado de un detalle a partir de lo
+        efectivamente descontado de inventario al iniciar la orden."""
+        cursor = self._cursor()
+        cursor.execute(
+            "UPDATE PRODUCCION_DETALLE SET costo_calculado = %s WHERE id_detalle = %s",
+            (costo_calculado, id_detalle),
+        )
+        self._commit()
+        return cursor.rowcount > 0
 
     # --- Análisis ---
 

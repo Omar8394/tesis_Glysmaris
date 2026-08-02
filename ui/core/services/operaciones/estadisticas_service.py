@@ -97,7 +97,15 @@ class EstadisticasService:
         baja_demanda: List[Dict[str, Any]] = []
 
         for registro in registros:
-            promedio_mensual = registro["ventas_totales_anio"] / 12
+            meses_con_ventas = registro.get("meses_con_ventas") or 1
+
+            # Con un solo mes de historial (el mes actual) no hay una
+            # base real contra la cual comparar; esperamos al menos
+            # 2 meses de datos para clasificar el producto.
+            if meses_con_ventas < 2:
+                continue
+
+            promedio_mensual = registro["ventas_totales_anio"] / meses_con_ventas
 
             if promedio_mensual <= 0:
                 continue

@@ -78,8 +78,7 @@ class CuentasPorCobrarModule(Module):
             on_buscar_cuentas=self._buscar_cuentas,
             on_cambiar_filtro_cuentas=self._cambiar_filtro_cuentas,
             on_cambiar_pagina_cuentas=self._cambiar_pagina_cuentas,
-            on_abonar=self._click_abonar,
-            on_ver_historial=self._click_historial,
+            on_ver_detalle=self._click_ver_detalle_cuentas,
             on_buscar_clientes=self._buscar_clientes,
             on_cambiar_pagina_clientes=self._cambiar_pagina_clientes,
             on_nuevo_cliente=self._abrir_form_cliente,
@@ -112,13 +111,69 @@ class CuentasPorCobrarModule(Module):
         self._refrescar_tabla_cuentas()
 
     def _refrescar_tabla_cuentas(self):
-        self.view.actualizar_paginador_cuentas(len(self._cuentas_filtradas))
+        grupos = self._agrupar_por_cliente(self._cuentas_filtradas)
+        self.view.actualizar_paginador_cuentas(len(grupos))
 
         inicio = (self._pagina_cuentas - 1) * self._por_pagina_cuentas
-        pagina = self._cuentas_filtradas[inicio: inicio + self._por_pagina_cuentas]
+        pagina = grupos[inicio: inicio + self._por_pagina_cuentas]
 
-        estado_por_fila = {c["id_cuenta"]: self._estado_fila(c) for c in pagina}
+        estado_por_fila = {g["id_cliente"]: g["peor_estado"] for g in pagina}
         self.view.poblar_tabla_cuentas(pagina, estado_por_fila)
+
+    def _agrupar_por_cliente(self, cuentas):
+        """
+        Convierte la lista de deudas (una fila por venta a crédito) en
+        una fila por cliente, sumando montos y quedándose con el
+        vencimiento más próximo entre las deudas activas. El detalle
+        de cada venta individual se consulta aparte al abrir "Ver
+        detalle" (_click_ver_detalle_cuentas), no se pierde.
+        """
+        prioridad_estado = {
+            None: 0,
+            EstadoFila.ALERTA: 1,
+            EstadoFila.VENCIDO: 2,
+            EstadoFila.VENCIDO_CRITICO: 3,
+        }
+
+        grupos = {}
+        orden = []
+        for cuenta in cuentas:
+            # Con id_cliente ausente (deudas antiguas de antes de que
+            # el cliente fuera obligatorio) se agrupa por nombre para
+            # no perder la fila, aunque no tendrá "Ver detalle" activo.
+            clave = cuenta.get("id_cliente") or f"__sin_id__{cuenta.get('cliente_nombre')}"
+
+            if clave not in grupos:
+                grupos[clave] = {
+                    "id_cliente": cuenta.get("id_cliente"),
+                    "cliente_nombre": cuenta.get("cliente_nombre") or "Cliente sin nombre",
+                    "cliente_telefono": cuenta.get("cliente_telefono"),
+                    "monto_total": 0.0,
+                    "monto_abonado": 0.0,
+                    "monto_pendiente": 0.0,
+                    "cantidad_deudas": 0,
+                    "fecha_vencimiento_proxima": None,
+                    "peor_estado": None,
+                }
+                orden.append(clave)
+
+            grupo = grupos[clave]
+            grupo["monto_total"] += float(cuenta.get("monto_total") or 0)
+            grupo["monto_abonado"] += float(cuenta.get("monto_abonado") or 0)
+            grupo["monto_pendiente"] += float(cuenta.get("monto_pendiente") or 0)
+            grupo["cantidad_deudas"] += 1
+
+            if cuenta.get("estado") in ("pendiente", "parcial"):
+                venc = _a_date(cuenta.get("fecha_vencimiento"))
+                venc_actual = _a_date(grupo["fecha_vencimiento_proxima"])
+                if venc and (venc_actual is None or venc < venc_actual):
+                    grupo["fecha_vencimiento_proxima"] = cuenta.get("fecha_vencimiento")
+
+            estado_fila = self._estado_fila(cuenta)
+            if prioridad_estado.get(estado_fila, 0) > prioridad_estado.get(grupo["peor_estado"], 0):
+                grupo["peor_estado"] = estado_fila
+
+        return [grupos[clave] for clave in orden]
 
     def _estado_fila(self, cuenta):
         """Traduce la deuda a un EstadoFila semántico para resaltar la
@@ -194,12 +249,7 @@ class CuentasPorCobrarModule(Module):
     # ------------------------------------------------------------
     # Abonar / historial de abonos
     # ------------------------------------------------------------
-    def _click_abonar(self, e):
-        id_cuenta = e.control.data
-        cuenta = self.cuenta_service.obtener(id_cuenta)
-        if not cuenta:
-            self.mensaje("No se encontró la cuenta.", tipo="error")
-            return
+    def _abrir_dialogo_abono_si_activa(self, cuenta):
         if cuenta["estado"] in ("pagada", "anulada"):
             self.mensaje("Esta cuenta ya no tiene saldo pendiente.", tipo="info")
             return
@@ -253,10 +303,10 @@ class CuentasPorCobrarModule(Module):
         )
         self._mostrar_dialogo(dialogo)
 
-    def _click_historial(self, e):
-        id_cuenta = e.control.data
-        cuenta = self.cuenta_service.obtener(id_cuenta)
-        abonos = self.cuenta_service.historial_abonos(id_cuenta)
+    def _abrir_dialogo_historial(self, cuenta):
+        abonos = self.cuenta_service.historial_abonos(cuenta["id_cuenta"])
+        fecha_venta = _a_date(cuenta.get("fecha_venta"))
+        subtitulo = f"venta del {fecha_venta.strftime('%d/%m/%Y')}" if fecha_venta else "esta venta"
 
         if abonos:
             filas = [
@@ -277,10 +327,78 @@ class CuentasPorCobrarModule(Module):
 
         dialogo = ft.AlertDialog(
             modal=True,
-            title=ft.Text(f"Historial de abonos — {cuenta.get('cliente_nombre') if cuenta else ''}"),
+            title=ft.Text(f"Historial de abonos — {subtitulo}"),
             content=ft.Column(
                 filas, tight=True, spacing=8, width=380,
                 scroll=ft.ScrollMode.AUTO, height=300,
+            ),
+            actions=[ft.TextButton("Cerrar", on_click=lambda ev: self._cerrar_dialogo())],
+        )
+        self._mostrar_dialogo(dialogo)
+
+    def _click_ver_detalle_cuentas(self, e):
+        """
+        Abre el detalle de TODAS las deudas (una por venta a crédito)
+        de un cliente, cada una con sus propios botones de Abonar e
+        Historial. La tabla principal solo muestra el total agrupado
+        por cliente; este diálogo es el "expandible" con el desglose
+        por venta y su fecha.
+        """
+        id_cliente = e.control.data
+        if id_cliente is None:
+            self.mensaje(
+                "Esta deuda no tiene un cliente registrado asociado "
+                "(dato antiguo); no se puede abrir el detalle.",
+                tipo="error",
+            )
+            return
+
+        cliente = self.cliente_service.obtener(id_cliente)
+        deudas = self.cuenta_service.listar_por_cliente(id_cliente)
+
+        def _fila_deuda(cuenta):
+            activa = cuenta.get("estado") in ("pendiente", "parcial")
+            fecha_venta = _a_date(cuenta.get("fecha_venta"))
+
+            botones = []
+            if activa:
+                botones.append(
+                    ft.IconButton(
+                        icon=ft.icons.PAYMENTS_ROUNDED,
+                        tooltip="Registrar abono",
+                        on_click=lambda ev, c=cuenta: self._abrir_dialogo_abono_si_activa(c),
+                    )
+                )
+            botones.append(
+                ft.IconButton(
+                    icon=ft.icons.HISTORY_ROUNDED,
+                    tooltip="Ver historial de abonos",
+                    on_click=lambda ev, c=cuenta: self._abrir_dialogo_historial(c),
+                )
+            )
+
+            return ft.Row(
+                [
+                    ft.Text(fecha_venta.strftime("%d/%m/%Y") if fecha_venta else "—", width=80),
+                    ft.Text(f"${float(cuenta.get('monto_total') or 0):.2f}", width=75),
+                    ft.Text(f"${float(cuenta.get('monto_pendiente') or 0):.2f}", width=80),
+                    ft.Text((cuenta.get("estado") or "").capitalize(), width=75),
+                    ft.Row(botones, spacing=0, tight=True),
+                ],
+                alignment=ft.MainAxisAlignment.START,
+            )
+
+        if deudas:
+            filas = [_fila_deuda(d) for d in deudas]
+        else:
+            filas = [ft.Text("Este cliente no tiene deudas registradas.")]
+
+        dialogo = ft.AlertDialog(
+            modal=True,
+            title=ft.Text(f"Deudas de {cliente.get('nombre') if cliente else 'cliente'}"),
+            content=ft.Column(
+                filas, tight=True, spacing=10, width=420,
+                scroll=ft.ScrollMode.AUTO, height=340,
             ),
             actions=[ft.TextButton("Cerrar", on_click=lambda ev: self._cerrar_dialogo())],
         )

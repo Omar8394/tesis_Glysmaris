@@ -217,7 +217,10 @@ class ProduccionService(CRUDService):
         # 2) Descuento real + bitácora en PRODUCCION_INGREDIENTES_RESERVADOS /
         #    PRODUCCION_ACTIVOS_RESERVADOS (necesaria para poder devolver el
         #    stock si la orden se cancela más adelante).
+        costo_real_por_detalle: Dict[int, float] = {}
+
         for detalle, req in requerimientos_por_detalle:
+            costo_detalle = 0.0
             for ing in req["ingredientes"]:
                 resultado_desc = self._ingrediente_service.descontar_stock(ing["id_ingrediente"], ing["cantidad"])
                 if resultado_desc.fallo:
@@ -225,6 +228,7 @@ class ProduccionService(CRUDService):
                         f"Error al descontar '{ing['nombre']}' (orden ya quedó parcialmente descontada, revisar manualmente): {resultado_desc.mensaje}"
                     )
                 for lote in resultado_desc.datos:
+                    costo_detalle += float(lote["cantidad_descontada"]) * float(lote.get("costo_unitario", 0.0))
                     self.repo.crear_reserva_ingrediente({
                         "id_orden": id_orden,
                         "id_detalle": detalle["id_detalle"],
@@ -236,6 +240,9 @@ class ProduccionService(CRUDService):
                     })
 
             for emp in req["empaques"]:
+                # (los empaques podrían sumar acá también si activo_service
+                # expone un costo unitario; se puede agregar después sin
+                # afectar el resto del flujo)
                 resultado_desc = self._activo_service.descontar_stock(emp["id_activo"], emp["cantidad"])
                 if resultado_desc.fallo:
                     return ServiceResult.error(
@@ -250,12 +257,18 @@ class ProduccionService(CRUDService):
                     "cantidad_consumida": emp["cantidad"],
                 })
 
+            costo_real_por_detalle[detalle["id_detalle"]] = (
+                costo_real_por_detalle.get(detalle["id_detalle"], 0.0) + costo_detalle
+            )
+
+        for id_detalle, costo in costo_real_por_detalle.items():
+            self.repo.actualizar_costo_calculado_detalle(id_detalle, costo)
+
         datos_orden = dict(orden)
         datos_orden["fecha_inicio"] = datetime.now()
         self.repo.actualizar_orden(id_orden, datos_orden)
         self.repo.actualizar_estado_orden(id_orden, "en_proceso")
         return ServiceResult.ok("Producción iniciada. Inventario descontado.")
-
     def finalizar_produccion(self, id_orden: int, datos_finalizacion: Dict[str, Any]) -> ServiceResult:
         orden = self.repo.obtener_orden(id_orden)
         if not orden:
@@ -264,20 +277,29 @@ class ProduccionService(CRUDService):
             return ServiceResult.error(f"No se puede finalizar una orden en estado '{orden['estado']}'.")
 
         detalles = self.repo.listar_detalles_por_orden(id_orden)
+        # Costo real por unidad obtenida en cada línea de producción,
+        # usado más abajo para valorizar automáticamente las mermas
+        # asociadas a esa línea (id_detalle -> costo por unidad).
+        costo_unitario_por_detalle: Dict[int, float] = {}
+
         for detalle in detalles:
             id_detalle = detalle["id_detalle"]
             datos_detalle = datos_finalizacion.get("detalles", {}).get(str(id_detalle), {})
             cantidad_obtenida = datos_detalle.get("cantidad_obtenida", detalle["cantidad_planificada"])
             rendimiento = (cantidad_obtenida / detalle["cantidad_planificada"]) * 100 if detalle["cantidad_planificada"] > 0 else 0
+            costo_calculado = datos_detalle.get("costo_calculado", 0.0)
 
             self.repo.actualizar_detalle(id_detalle, {
                 "cantidad_planificada": detalle["cantidad_planificada"],
                 "cantidad_obtenida": cantidad_obtenida,
                 "rendimiento_porcentaje": rendimiento,
                 "precio_final": datos_detalle.get("precio_final", 0.0),
-                "costo_calculado": datos_detalle.get("costo_calculado", 0.0),
+                "costo_calculado": costo_calculado,
                 "disponible_venta": datos_detalle.get("disponible_venta", True),
             })
+
+            if cantidad_obtenida:
+                costo_unitario_por_detalle[id_detalle] = float(costo_calculado) / float(cantidad_obtenida)
 
         # Registro de mermas y, si son recuperables, del subproducto que
         # generaron: se busca (o crea) el producto-catálogo con el nombre
@@ -286,6 +308,9 @@ class ProduccionService(CRUDService):
         # componente de un producto elaborado (PRODUCTO_COMPONENTES).
         advertencias_subproducto: List[str] = []
         for merma in datos_finalizacion.get("mermas", []):
+            costo_unitario = costo_unitario_por_detalle.get(merma.get("id_detalle"), 0.0)
+            costo_asociado = merma.get("costo_asociado") or (costo_unitario * float(merma["cantidad"]))
+
             id_merma = self.repo.crear_merma({
                 "id_orden": id_orden,
                 "id_detalle": merma.get("id_detalle"),
@@ -296,7 +321,7 @@ class ProduccionService(CRUDService):
                 "motivo": merma["motivo"],
                 "nombre_recuperado": merma.get("nombre_recuperado"),
                 "descripcion": merma.get("descripcion", ""),
-                "costo_asociado": merma.get("costo_asociado", 0.0),
+                "costo_asociado": costo_asociado,
             })
 
             if merma["tipo_merma"] == "recuperable":

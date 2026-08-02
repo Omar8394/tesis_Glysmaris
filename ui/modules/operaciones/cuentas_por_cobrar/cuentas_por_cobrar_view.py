@@ -61,17 +61,17 @@ def _formatear_fecha(valor):
 
 
 COLUMNAS_CUENTAS = [
-    ColumnaTabla("Cliente", campo="cliente_nombre", width=150),
+    ColumnaTabla("Cliente", campo="cliente_nombre", width=160),
     ColumnaTabla("Teléfono", campo="cliente_telefono", width=95),
+    ColumnaTabla("Deudas", campo="cantidad_deudas", width=65, alineacion=ft.TextAlign.CENTER),
     ColumnaTabla("Total", campo="monto_total", width=80,
                  alineacion=ft.TextAlign.RIGHT, formato=_formatear_moneda),
     ColumnaTabla("Abonado", campo="monto_abonado", width=80,
                  alineacion=ft.TextAlign.RIGHT, formato=_formatear_moneda),
     ColumnaTabla("Pendiente", campo="monto_pendiente", width=90,
                  alineacion=ft.TextAlign.RIGHT, formato=_formatear_moneda),
-    ColumnaTabla("Venta", campo="fecha_venta", width=85, formato=_formatear_fecha),
-    ColumnaTabla("Vence", campo="fecha_vencimiento", width=85, formato=_formatear_fecha),
-    ColumnaTabla("Estado", campo="estado", width=80, formato=lambda v: (v or "").capitalize()),
+    ColumnaTabla("Próx. vencimiento", campo="fecha_vencimiento_proxima", width=115,
+                 formato=_formatear_fecha),
 ]
 
 COLUMNAS_CLIENTES = [
@@ -95,8 +95,7 @@ class CuentasPorCobrarView(ft.Column):
         on_buscar_cuentas,
         on_cambiar_filtro_cuentas,
         on_cambiar_pagina_cuentas,
-        on_abonar,
-        on_ver_historial,
+        on_ver_detalle,
         on_buscar_clientes,
         on_cambiar_pagina_clientes,
         on_nuevo_cliente,
@@ -139,15 +138,10 @@ class CuentasPorCobrarView(ft.Column):
             columnas=COLUMNAS_CUENTAS,
             acciones=[
                 AccionTabla(
-                    icono=ft.icons.PAYMENTS_ROUNDED,
-                    tooltip="Registrar abono",
-                    callback=on_abonar,
+                    icono=ft.icons.VISIBILITY_ROUNDED,
+                    tooltip="Ver detalle de deudas de este cliente",
+                    callback=on_ver_detalle,
                     color=self.tema.primary,
-                ),
-                AccionTabla(
-                    icono=ft.icons.HISTORY_ROUNDED,
-                    tooltip="Ver historial de abonos",
-                    callback=on_ver_historial,
                 ),
             ],
         )
@@ -276,17 +270,23 @@ class CuentasPorCobrarView(ft.Column):
             self.seccion_recordatorios.visible = False
         self.seccion_recordatorios.update()
 
-    def poblar_tabla_cuentas(self, cuentas: list[dict], estado_por_fila: dict):
+    def poblar_tabla_cuentas(self, grupos_por_cliente: list[dict], estado_por_fila: dict):
+        """
+        `grupos_por_cliente`: una fila por cliente (ya agrupada/sumada
+        por el módulo), no una fila por venta a crédito. `item_id` de
+        cada fila es id_cliente, para poder abrir el detalle de todas
+        sus deudas.
+        """
         self.tabla_cuentas.limpiar()
-        for cuenta in cuentas:
+        for grupo in grupos_por_cliente:
             valores = [
-                col.formato(cuenta.get(col.campo)) if col.formato else cuenta.get(col.campo)
+                col.formato(grupo.get(col.campo)) if col.formato else grupo.get(col.campo)
                 for col in COLUMNAS_CUENTAS
             ]
             self.tabla_cuentas.agregar_fila(
                 valores,
-                item_id=cuenta["id_cuenta"],
-                estado=estado_por_fila.get(cuenta["id_cuenta"]),
+                item_id=grupo["id_cliente"],
+                estado=estado_por_fila.get(grupo["id_cliente"]),
             )
         self.tabla_cuentas.actualizar()
 

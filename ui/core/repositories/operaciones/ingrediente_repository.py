@@ -326,21 +326,10 @@ class IngredienteRepository(CRUDRepository):
         return float(row["total"]) if row else 0.0
 
     def descontar_stock_peps(self, id_ingrediente: int, cantidad: float) -> Optional[List[Dict]]:
-        """
-        Descuenta 'cantidad' del ingrediente en orden PEPS (el lote que
-        vence primero se consume primero), usado al iniciar una orden de
-        producción.
-
-        Devuelve la lista de lotes afectados
-        [{"id_lote": ..., "cantidad_descontada": ...}, ...] para poder
-        revertir el descuento más adelante si la orden se cancela (ver
-        devolver_stock_lote). Si el stock total disponible es menor que
-        'cantidad', no descuenta nada y devuelve None.
-        """
         cursor = self._cursor()
         cursor.execute(
             """
-            SELECT id_lote, stock_actual FROM LOTES_INVENTARIO
+            SELECT id_lote, stock_actual, costo_unitario FROM LOTES_INVENTARIO
             WHERE id_ingrediente = %s AND stock_actual > 0
             ORDER BY fecha_caducidad ASC
             """,
@@ -363,7 +352,11 @@ class IngredienteRepository(CRUDRepository):
                 "UPDATE LOTES_INVENTARIO SET stock_actual = stock_actual - %s WHERE id_lote = %s",
                 (tomar, lote["id_lote"]),
             )
-            afectados.append({"id_lote": lote["id_lote"], "cantidad_descontada": tomar})
+            afectados.append({
+                "id_lote": lote["id_lote"],
+                "cantidad_descontada": tomar,
+                "costo_unitario": float(lote["costo_unitario"]),  # <-- nuevo
+            })
             restante -= tomar
 
         self._commit()

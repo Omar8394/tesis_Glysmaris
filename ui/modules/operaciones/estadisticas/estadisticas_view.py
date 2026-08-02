@@ -23,6 +23,12 @@ import flet as ft
 
 from ui.core.services.factory import ServiceFactory
 
+# Paleta cíclica para los charts (barras y torta)
+_PALETA = [
+    "#7C5CFC", "#FF8A65", "#4FC3F7", "#81C784",
+    "#FFD54F", "#F06292", "#A1887F", "#4DB6AC",
+]
+
 
 class EstadisticasView(ft.Column):
     def __init__(self):
@@ -69,45 +75,21 @@ class EstadisticasView(ft.Column):
     def _crear_pestana_rendimiento(self):
         resultado = self._service.obtener_rendimiento_productos(dias=30)
 
-        lista_barras = ft.Column(spacing=10, scroll=ft.ScrollMode.AUTO, expand=True)
+        cuerpo = ft.Column(spacing=15, scroll=ft.ScrollMode.AUTO, expand=True)
 
         if not resultado.exito:
-            lista_barras.controls.append(
-                ft.Text(resultado.mensaje, color="red600"),
-            )
+            cuerpo.controls.append(ft.Text(resultado.mensaje, color="red600"))
         elif not resultado.datos:
-            lista_barras.controls.append(
-                ft.Text(resultado.mensaje or "No hay registros de ventas suficientes."),
+            cuerpo.controls.append(
+                ft.Text(resultado.mensaje or "No hay registros de ventas suficientes.")
             )
         else:
             datos = resultado.datos
-            max_ventas = max(d["total_unidades"] for d in datos) or 1
+            top_chart = datos[:8]  # el chart de barras se satura con muchos productos
 
-            for p in datos:
-                porcentaje = p["total_unidades"] / max_ventas
-
-                fila_barra = ft.Column(
-                    [
-                        ft.Row(
-                            [
-                                ft.Text(p["nombre_producto"], weight="w500", expand=True),
-                                ft.Text(
-                                    f"{p['total_unidades']} un. (${p['total_generado']:.2f})",
-                                    weight="bold",
-                                ),
-                            ]
-                        ),
-                        ft.ProgressBar(
-                            value=porcentaje,
-                            color=ft.colors.PRIMARY,
-                            bgcolor="grey200",
-                            height=8,
-                        ),
-                    ],
-                    spacing=3,
-                )
-
-                lista_barras.controls.append(fila_barra)
+            cuerpo.controls.append(self._crear_bar_chart_rendimiento(top_chart))
+            cuerpo.controls.append(ft.Divider())
+            cuerpo.controls.append(self._crear_lista_rendimiento(datos))
 
         return ft.Container(
             content=ft.Column(
@@ -118,11 +100,99 @@ class EstadisticasView(ft.Column):
                         size=16,
                     ),
                     ft.Divider(),
-                    lista_barras,
-                ]
+                    cuerpo,
+                ],
+                expand=True,
             ),
             padding=15,
         )
+
+    def _crear_bar_chart_rendimiento(self, datos):
+        max_unidades = float(max(d["total_unidades"] for d in datos) or 1)
+
+        grupos = []
+        etiquetas = []
+
+        for i, p in enumerate(datos):
+            color = _PALETA[i % len(_PALETA)]
+            unidades = float(p["total_unidades"])
+
+            grupos.append(
+                ft.BarChartGroup(
+                    x=i,
+                    bar_rods=[
+                        ft.BarChartRod(
+                            from_y=0,
+                            to_y=unidades,
+                            width=28,
+                            color=color,
+                            tooltip=f"{p['nombre_producto']}\n{p['total_unidades']} un.",
+                            border_radius=4,
+                        )
+                    ],
+                )
+            )
+
+            nombre_corto = (
+                p["nombre_producto"][:10] + "…"
+                if len(p["nombre_producto"]) > 10
+                else p["nombre_producto"]
+            )
+            etiquetas.append(
+                ft.ChartAxisLabel(
+                    value=i,
+                    label=ft.Text(nombre_corto, size=10, no_wrap=True),
+                )
+            )
+
+        return ft.Container(
+            content=ft.BarChart(
+                bar_groups=grupos,
+                border=ft.border.all(1, ft.colors.OUTLINE_VARIANT),
+                left_axis=ft.ChartAxis(labels_size=40),
+                bottom_axis=ft.ChartAxis(labels=etiquetas, labels_size=36),
+                horizontal_grid_lines=ft.ChartGridLines(
+                    color=ft.colors.OUTLINE_VARIANT, width=1, dash_pattern=[3, 3]
+                ),
+                tooltip_bgcolor=ft.colors.with_opacity(0.85, ft.colors.SURFACE_VARIANT),
+                max_y=max_unidades * 1.15,
+                interactive=True,
+                expand=True,
+            ),
+            height=260,
+        )
+
+    def _crear_lista_rendimiento(self, datos):
+        lista_barras = ft.Column(spacing=10)
+        max_ventas = float(max(d["total_unidades"] for d in datos) or 1)
+
+        for p in datos:
+            porcentaje = float(p["total_unidades"]) / max_ventas
+
+            fila_barra = ft.Column(
+                [
+                    ft.Row(
+                        [
+                            ft.Text(p["nombre_producto"], weight="w500", expand=True),
+                            ft.Text(
+                                f"{p['total_unidades']} un. (${p['total_generado']:.2f})",
+                                weight="bold",
+                            ),
+                        ]
+                    ),
+                    ft.ProgressBar(
+                        value=porcentaje,
+                        color=ft.colors.PRIMARY,
+                        bgcolor="grey200",
+                        height=8,
+                    ),
+                ],
+                spacing=3,
+            )
+
+            lista_barras.controls.append(fila_barra)
+
+        return lista_barras
 
     # -------------------------------------------------------------
     # Pestaña 2: Temporadas
@@ -221,41 +291,6 @@ class EstadisticasView(ft.Column):
     def _crear_pestana_mermas(self):
         resultado = self._service.obtener_reporte_mermas(limite=10)
 
-        tabla = ft.DataTable(
-            columns=[
-                ft.DataColumn(ft.Text("Producto / Insumo")),
-                ft.DataColumn(ft.Text("Motivo")),
-                ft.DataColumn(ft.Text("Cantidad")),
-                ft.DataColumn(ft.Text("Costo Pérdida ($)")),
-            ],
-            rows=[],
-        )
-
-        contenido_extra = None
-
-        if not resultado.exito:
-            contenido_extra = ft.Text(resultado.mensaje, color="red600")
-        elif not resultado.datos:
-            contenido_extra = ft.Text(resultado.mensaje or "No hay mermas registradas.")
-        else:
-            for m in resultado.datos:
-                tabla.rows.append(
-                    ft.DataRow(
-                        cells=[
-                            ft.DataCell(ft.Text(m["item"])),
-                            ft.DataCell(ft.Text(m["motivo"])),
-                            ft.DataCell(ft.Text(str(m["cantidad_perdida"]))),
-                            ft.DataCell(
-                                ft.Text(
-                                    f"${m['costo_total_perdida']:.2f}",
-                                    color="red600",
-                                    weight="bold",
-                                )
-                            ),
-                        ]
-                    )
-                )
-
         cuerpo = [
             ft.Text(
                 "Reporte de Desperdicios y Mermas Críticas",
@@ -265,12 +300,107 @@ class EstadisticasView(ft.Column):
             ft.Divider(),
         ]
 
-        if contenido_extra is not None:
-            cuerpo.append(contenido_extra)
+        if not resultado.exito:
+            cuerpo.append(ft.Text(resultado.mensaje, color="red600"))
+        elif not resultado.datos:
+            cuerpo.append(ft.Text(resultado.mensaje or "No hay mermas registradas."))
         else:
-            cuerpo.append(ft.ListView(controls=[tabla], expand=True))
+            cuerpo.append(self._crear_pie_chart_mermas(resultado.datos))
+            cuerpo.append(ft.Divider())
+            cuerpo.append(self._crear_tabla_mermas(resultado.datos))
 
         return ft.Container(
-            content=ft.Column(cuerpo),
+            content=ft.Column(cuerpo, expand=True),
             padding=15,
         )
+
+    def _crear_pie_chart_mermas(self, datos):
+        total_costo = sum(float(m["costo_total_perdida"] or 0) for m in datos)
+        divisor_porcentaje = total_costo or 1
+
+        secciones = []
+        leyenda = ft.Column(spacing=6)
+
+        for i, m in enumerate(datos):
+            color = _PALETA[i % len(_PALETA)]
+            costo = float(m["costo_total_perdida"] or 0)
+            porcentaje = costo / divisor_porcentaje * 100
+
+            secciones.append(
+                ft.PieChartSection(
+                    value=costo,
+                    title=f"{porcentaje:.0f}%" if porcentaje >= 6 else "",
+                    title_style=ft.TextStyle(
+                        size=11, color=ft.colors.WHITE, weight="bold"
+                    ),
+                    color=color,
+                    radius=90,
+                )
+            )
+            leyenda.controls.append(
+                ft.Row(
+                    [
+                        ft.Container(width=12, height=12, bgcolor=color, border_radius=3),
+                        ft.Text(f"{m['item']} · {m['motivo']}", size=12, expand=True),
+                        ft.Text(f"${costo:.2f}", size=12, weight="bold"),
+                    ],
+                    spacing=8,
+                )
+            )
+
+        return ft.Row(
+            [
+                ft.Container(
+                    content=ft.PieChart(
+                        sections=secciones,
+                        sections_space=2,
+                        center_space_radius=35,
+                        expand=True,
+                    ),
+                    height=220,
+                    width=220,
+                ),
+                ft.VerticalDivider(),
+                ft.Column(
+                    [
+                        ft.Text(
+                            f"Costo total en pérdidas: ${total_costo:.2f}",
+                            weight="bold",
+                        ),
+                        leyenda,
+                    ],
+                    expand=True,
+                    scroll=ft.ScrollMode.AUTO,
+                ),
+            ],
+            spacing=15,
+        )
+
+    def _crear_tabla_mermas(self, datos):
+        tabla = ft.DataTable(
+            columns=[
+                ft.DataColumn(ft.Text("Producto / Insumo")),
+                ft.DataColumn(ft.Text("Motivo")),
+                ft.DataColumn(ft.Text("Cantidad")),
+                ft.DataColumn(ft.Text("Costo Pérdida ($)")),
+            ],
+            rows=[
+                ft.DataRow(
+                    cells=[
+                        ft.DataCell(ft.Text(m["item"])),
+                        ft.DataCell(ft.Text(m["motivo"])),
+                        ft.DataCell(ft.Text(str(m["cantidad_perdida"]))),
+                        ft.DataCell(
+                            ft.Text(
+                                f"${m['costo_total_perdida']:.2f}",
+                                color="red600",
+                                weight="bold",
+                            )
+                        ),
+                    ]
+                )
+                for m in datos
+            ],
+        )
+
+        return ft.ListView(controls=[tabla], expand=True)
