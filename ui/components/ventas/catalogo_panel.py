@@ -46,7 +46,11 @@ class CatalogoPanel(ft.Column):
             self.grid
         ]
 
-        self.actualizar_grid()
+        # Antes se llamaba directo a actualizar_grid(), lo que mostraba
+        # productos agotados en el primer render aunque "Ocultar agotados"
+        # ya nace marcado (value=True). filtrar() aplica ese estado inicial
+        # (y el resto de filtros) antes de pintar el grid.
+        self.filtrar()
 
     def actualizar_productos(self, productos):
         """Reemplaza la lista de productos y refresca categorías, filtro y grid."""

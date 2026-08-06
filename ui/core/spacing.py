@@ -84,3 +84,4 @@ class AppSpacing:
     # =====================================================
 
     SIDEBAR_PADDING = LG
+    SIDEBAR_PADDING_COLLAPSED = SM

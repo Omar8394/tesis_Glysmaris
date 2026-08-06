@@ -9,9 +9,7 @@ class CarritoPanel(ft.Column):
         self,
         on_cambiar_cantidad,
         on_eliminar,
-        on_abrir_agregados,
         on_continuar_cobro,
-        activos_disponibles
     ):
         super().__init__(
             expand=True,
@@ -22,9 +20,10 @@ class CarritoPanel(ft.Column):
         )
         self.on_cambiar_cantidad = on_cambiar_cantidad
         self.on_eliminar = on_eliminar
-        self.on_abrir_agregados = on_abrir_agregados
         self.on_continuar_cobro = on_continuar_cobro
-        self.activos_disponibles = activos_disponibles
+        # La función de "agregados" por línea de carrito está oculta
+        # temporalmente (ver fila_carrito.py); se reactivará junto con
+        # on_abrir_agregados y activos_disponibles en una versión futura.
 
         # Lista de filas (scroll)
         self.lista = ft.Column(spacing=AppSpacing.SM, scroll=ft.ScrollMode.AUTO, expand=True)
@@ -65,13 +64,18 @@ class CarritoPanel(ft.Column):
                     personalizado=item.get('personalizado', False),
                     on_cantidad_changed=self.on_cambiar_cantidad,
                     on_eliminar=self.on_eliminar,
-                    on_abrir_agregados=self.on_abrir_agregados,
-                    activos_disponibles=self.activos_disponibles
                 )
                 self.lista.controls.append(fila)
 
-        # Actualizar resumen
-        total = sum(item['producto']['precio_venta'] * item['cantidad'] for item in carrito)
+        # Actualizar resumen. Nota: mientras la función de "agregados" esté
+        # oculta, este total (precio * cantidad) coincide exactamente con
+        # VentasModule._calcular_total(); si se reactivan los agregados,
+        # ambos cálculos deben volver a unificarse para no mostrar un total
+        # distinto en el carrito y en el panel de pago.
+        total = sum(
+            float(item['producto'].get('precio_venta', 0) or 0) * item['cantidad']
+            for item in carrito
+        )
         descuento = 0  # por implementar
         self.resumen.actualizar(total, descuento)
 

@@ -26,12 +26,23 @@ class BotonPrimario(ft.ElevatedButton):
         tema = ThemeManager.theme
 
         # Construir contenido con texto e icono
+        # ✅ Antes este ft.Text no tenía no_wrap/overflow/max_lines: un
+        # texto más largo que el ancho fijo del botón (ej. "Cambiar
+        # tipo" vs "Atrás", o "Nuevo Producto") envolvía a una segunda
+        # línea dentro de una altura que no crecía, y esa segunda línea
+        # se dibujaba fuera de los bordes del botón. Ahora se corta con
+        # "…" en vez de desbordarse.
         self._texto_control = ft.Text(
             texto,
             size=AppTypography.BUTTON_SIZE,
             weight=AppTypography.SEMIBOLD,
             font_family=AppTypography.FONT_FAMILY,
             color=tema.button_text,
+            no_wrap=True,
+            overflow=ft.TextOverflow.ELLIPSIS,
+            max_lines=1,
+            expand=True,
+            text_align=ft.TextAlign.CENTER,
         )
         contenido = ft.Row(
             [
@@ -85,6 +96,7 @@ class BotonSecundario(BotonPrimario):
         expand=False,
         width=None,
         height=AppSize.BUTTON_HEIGHT,
+        disabled=False,
     ):
         super().__init__(
             texto=texto,
@@ -93,6 +105,7 @@ class BotonSecundario(BotonPrimario):
             expand=expand,
             width=width,
             height=height,
+            disabled=disabled,
         )
         tema = ThemeManager.theme
         self.bgcolor = tema.surface
@@ -116,13 +129,15 @@ class BotonPeligro(BotonPrimario):
         on_click=None,
         expand=False,
         width=None,
+        disabled=False,
     ):
         super().__init__(
-            texto,
-            icono,
-            on_click,
-            expand,
-            width,
+            texto=texto,
+            icono=icono,
+            on_click=on_click,
+            expand=expand,
+            width=width,
+            disabled=disabled,
         )
         self.bgcolor = ThemeManager.theme.error
         # Ajustar color del texto e icono a blanco

@@ -31,6 +31,8 @@ from ui.core.repositories.operaciones.cliente_repository import ClienteRepositor
 from ui.core.services.operaciones.cliente_service import ClienteService
 from ui.core.repositories.operaciones.cuenta_cobrar_repository import CuentaPorCobrarRepository
 from ui.core.services.operaciones.cuenta_cobrar_service import CuentaPorCobrarService
+from ui.core.repositories.operaciones.reporte_repository import ReporteRepository
+from ui.core.services.operaciones.reporte_service import ReporteService
 
 class ServiceFactory:
     """Crea y cachea servicios."""
@@ -136,6 +138,14 @@ class ServiceFactory:
             activo_service = cls.get_activo_service()
             cls._instances["parametros_negocio"] = ParametrosNegocioService(repo, activo_service)
         return cls._instances["parametros_negocio"]
+
+    @classmethod
+    def get_reporte_service(cls) -> ReporteService:
+        if "reporte" not in cls._instances:
+            db = DatabaseFactory.get_operaciones()
+            repo = ReporteRepository(db)
+            cls._instances["reporte"] = ReporteService(repo)
+        return cls._instances["reporte"]
 
     @classmethod
     def get_auth_service(cls) -> AuthService:

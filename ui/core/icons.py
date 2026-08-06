@@ -46,6 +46,7 @@ class AppIcons:
     SAVE = ft.icons.SAVE_ROUNDED
     CANCEL = ft.icons.CLOSE_ROUNDED
     CLEAR = ft.icons.CLOSE_ROUNDED
+    CLOSE = ft.icons.CLOSE_ROUNDED
     REFRESH = ft.icons.REFRESH_ROUNDED
 
     # =====================================================
@@ -141,4 +142,4 @@ class AppIcons:
     FATORY = ft.icons.FACTORY_ROUNDED
     PLAY = ft.icons.PLAY_ARROW
     EYE = ft.icons.VISIBILITY_ROUNDED
-
+    MORE_VERT = ft.icons.MORE_VERT_ROUNDED

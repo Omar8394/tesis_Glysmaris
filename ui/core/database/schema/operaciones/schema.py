@@ -242,6 +242,10 @@ SCHEMA_OPERACIONES = [
         id_presentacion INT NULL,
         cantidad_planificada INT NOT NULL DEFAULT 1,
         cantidad_obtenida INT DEFAULT 0,
+        -- Cuánto de cantidad_obtenida ya se vendió (VentaRepository la
+        -- incrementa en cada venta dentro de _consumir_stock_producto).
+        -- stock disponible para vender = cantidad_obtenida - cantidad_vendida.
+        cantidad_vendida INT NOT NULL DEFAULT 0,
         peso_objetivo DECIMAL(10,2) NULL,
         unidad_objetivo VARCHAR(20) NULL,
         precio_final DECIMAL(10,2) DEFAULT 0,
@@ -606,6 +610,7 @@ SCHEMA_OPERACIONES = [
         proveedor VARCHAR(100),
         codigo_interno VARCHAR(50),
         observaciones TEXT,
+        modo_adquisicion ENUM('comprado', 'alquilado') NULL,
         modalidad_costo ENUM(
             'por_unidad',
             'mensual',
@@ -634,4 +639,3 @@ SCHEMA_OPERACIONES = [
     )
     """,
 ]
-

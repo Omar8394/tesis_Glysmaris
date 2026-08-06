@@ -121,7 +121,18 @@ class IngredienteRepository(CRUDRepository):
         INGREDIENTES (stock_actual, costo_unitario, fecha_caducidad,
         fecha_ingreso) — esas viven en LOTES_INVENTARIO desde que se
         implementó FIFO. Para tocar un lote puntual usar actualizar_lote().
+
+        ⚠️ El flujo de edición real de la UI usa actualizar_lote(), no este
+        método. Se mantiene porque CRUDService/CRUDRepository lo declaran
+        como parte del contrato CRUD base.
         """
+        cursor = self._cursor()
+        cursor.execute(
+            "SELECT 1 FROM INGREDIENTES WHERE id_ingrediente=%s", (identificador,)
+        )
+        if not cursor.fetchone():
+            return False
+
         query = """
             UPDATE INGREDIENTES SET
                 nombre_ingrediente=%s, unidad_medida=%s, categoria=%s,
@@ -134,10 +145,11 @@ class IngredienteRepository(CRUDRepository):
             datos.get("descripcion"), datos.get("contenido_unidad"),
             identificador,
         )
-        cursor = self._cursor()
         cursor.execute(query, valores)
         self._commit()
-        return cursor.rowcount > 0
+        # ✅ Igual que en actualizar_lote(): rowcount cuenta filas
+        # modificadas, no encontradas. La existencia ya se confirmó arriba.
+        return True
 
     def actualizar_lote(self, id_lote: int, datos: Dict[str, Any]) -> bool:
         """✅ Nuevo: actualiza un lote puntual (stock/costo/fechas) en
@@ -185,7 +197,13 @@ class IngredienteRepository(CRUDRepository):
         )
 
         self._commit()
-        return cursor.rowcount > 0
+        # ✅ Antes se devolvía `cursor.rowcount > 0`. Con los conectores
+        # MySQL estándar, rowcount cuenta filas MODIFICADAS, no encontradas:
+        # si el usuario guarda sin cambiar ningún valor, el UPDATE afecta 0
+        # filas y esto devolvía False ("No se pudo actualizar.") aunque el
+        # lote exista y todo esté bien. La existencia ya se confirmó arriba
+        # con el SELECT (si no existiera, ya habríamos retornado False).
+        return True
 
     def registrar_perdida(
         self,

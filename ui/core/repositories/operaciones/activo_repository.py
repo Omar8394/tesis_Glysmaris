@@ -20,6 +20,7 @@ class ActivoRepository(CRUDRepository):
             "proveedor": activo.proveedor,
             "codigo_interno": activo.codigo_interno,
             "observaciones": activo.observaciones,
+            "modo_adquisicion": activo.modo_adquisicion,
             "modalidad_costo": activo.modalidad_costo,
             "unidad_costo": activo.unidad_costo,
             "periodo": activo.periodo,
@@ -37,15 +38,16 @@ class ActivoRepository(CRUDRepository):
             INSERT INTO ACTIVOS
                 (nombre, tipo, costo_unitario, stock_actual, unidad,
                  descripcion, estado, proveedor, codigo_interno,
-                 observaciones, modalidad_costo, unidad_costo, periodo,
+                 observaciones, modo_adquisicion, modalidad_costo, unidad_costo, periodo,
                  vida_util_meses, valor_residual)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             datos["nombre"], datos.get("tipo", ""), datos.get("costo_unitario", 0.0),
             datos.get("stock_actual", 0.0), datos.get("unidad", "unidad"),
             datos.get("descripcion", ""), datos.get("estado", "activo"),
             datos.get("proveedor", ""), datos.get("codigo_interno", ""),
-            datos.get("observaciones", ""), datos.get("modalidad_costo", "por_unidad"),
+            datos.get("observaciones", ""), datos.get("modo_adquisicion"),
+            datos.get("modalidad_costo", "por_unidad"),
             datos.get("unidad_costo", ""), datos.get("periodo", ""),
             datos.get("vida_util_meses"), datos.get("valor_residual", 0.0)
         ))
@@ -59,7 +61,7 @@ class ActivoRepository(CRUDRepository):
             UPDATE ACTIVOS SET
                 nombre=%s, tipo=%s, costo_unitario=%s, stock_actual=%s,
                 unidad=%s, descripcion=%s, estado=%s, proveedor=%s,
-                codigo_interno=%s, observaciones=%s, modalidad_costo=%s,
+                codigo_interno=%s, observaciones=%s, modo_adquisicion=%s, modalidad_costo=%s,
                 unidad_costo=%s, periodo=%s, vida_util_meses=%s, valor_residual=%s
             WHERE id_activo=%s
         """, (
@@ -67,7 +69,8 @@ class ActivoRepository(CRUDRepository):
             datos.get("stock_actual", 0.0), datos.get("unidad", "unidad"),
             datos.get("descripcion", ""), datos.get("estado", "activo"),
             datos.get("proveedor", ""), datos.get("codigo_interno", ""),
-            datos.get("observaciones", ""), datos.get("modalidad_costo", "por_unidad"),
+            datos.get("observaciones", ""), datos.get("modo_adquisicion"),
+            datos.get("modalidad_costo", "por_unidad"),
             datos.get("unidad_costo", ""), datos.get("periodo", ""),
             datos.get("vida_util_meses"), datos.get("valor_residual", 0.0),
             identificador
@@ -109,6 +112,17 @@ class ActivoRepository(CRUDRepository):
             (tipo,)
         )
         return [dict(row) for row in cursor.fetchall()]
+
+    def cambiar_estado(self, id_activo: int, estado: str) -> bool:
+        """Actualiza únicamente la columna estado, sin tocar el resto del
+        registro (usado por activar/desactivar desde la tarjeta)."""
+        cursor = self._cursor()
+        cursor.execute(
+            "UPDATE ACTIVOS SET estado=%s WHERE id_activo=%s",
+            (estado, id_activo),
+        )
+        self._commit()
+        return cursor.rowcount > 0
 
     def descontar_stock(self, id_activo: int, cantidad: float) -> bool:
         """Descuenta stock_actual de forma atómica: la condición

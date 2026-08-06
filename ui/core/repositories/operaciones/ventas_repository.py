@@ -22,6 +22,11 @@ class VentaRepository(CRUDRepository):
         try:
             cursor = self._cursor()
             cursor.execute("""
+                -- OJO: 'precio_venta' aquí sale de PRODUCTOS.precio_final,
+                -- NO de la columna PRODUCTOS.precio_venta (que también
+                -- existe en el schema y no se usa en este módulo). Se
+                -- aliasa así porque el resto del flujo de Ventas (carrito,
+                -- VentaService, VentaRepository) espera esa clave.
                 SELECT
                     p.id_producto,
                     p.nombre_producto AS nombre,

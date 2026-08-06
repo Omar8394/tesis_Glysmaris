@@ -1,3 +1,9 @@
+# NOTA: este componente no se instancia actualmente. La función de
+# "agregados" por línea de carrito se ocultó temporalmente en
+# fila_carrito.py / carrito_panel.py / ventas_module.py / ventas_service.py
+# y se reactivará en una versión futura. Se deja el componente intacto
+# (y corregido) para no perder el trabajo ya hecho.
+
 import flet as ft
 from ui.components.autocompletado import AutoCompletado
 from ui.components.campo_texto import CampoTexto
@@ -58,7 +64,12 @@ class PanelAgregados(ft.Container):
         activo = next((a for a in self.activos_disponibles if a['nombre'] == nombre), None)
         if not activo:
             return
-        cantidad = int(self.cantidad_activo.value or 1)
+        try:
+            cantidad = int(self.cantidad_activo.value or 1)
+        except ValueError:
+            return
+        if cantidad <= 0:
+            return
         # Crear el agregado
         agregado = {
             'id_activo': activo['id_activo'],

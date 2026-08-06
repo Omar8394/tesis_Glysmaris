@@ -56,10 +56,16 @@ class PanelEstados(ft.Row):
                 self.agrupadas[estado].append(o)
 
         # Construir columnas
+        # ❌ Bug anterior: "cancelada" se agrupaba en self.agrupadas pero
+        # nunca tenía columna propia acá -- las órdenes canceladas
+        # quedaban invisibles en el tablero (y si se filtraba por
+        # "cancelada" en el módulo, las 3 columnas de arriba se veían
+        # vacías sin ninguna pista de dónde habían quedado).
         self.controls = [
             self._crear_columna("pendiente", "⏳ Pendientes", ft.colors.AMBER),
             self._crear_columna("en_proceso", "🔄 En proceso", ft.colors.BLUE),
             self._crear_columna("finalizada", "✅ Finalizadas", ft.colors.GREEN),
+            self._crear_columna("cancelada", "❌ Canceladas", ft.colors.RED),
         ]
 
     def _crear_columna(self, estado: str, titulo: str, color: str) -> ft.Container:

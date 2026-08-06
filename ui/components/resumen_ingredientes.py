@@ -18,13 +18,16 @@ class ResumenIngredientes(ft.Row):
 
         # Inicializamos con valores por defecto (0)
 
-        self.total_tarjeta = TarjetaResumen(titulo="Total Ingredientes", valor=0, icono=AppIcons.INGREDIENT, width= 170)
-        self.stock_tarjeta = TarjetaResumen(titulo="Stock Bajo ⚠️", valor=0, icono=AppIcons.WARNING, color="warning", width= 170)
-        self.caducar_tarjeta = TarjetaResumen(titulo="Por Caducar 🕒", valor=0, icono=AppIcons.CALENDAR, color="error", width= 170)
-        self.categorias_tarjeta = TarjetaResumen(titulo="Categorías", valor=0, icono=AppIcons.CATEGORY, color="info", width= 170)
+        self.total_tarjeta = TarjetaResumen(titulo="Total Ingredientes", valor=0, icono=AppIcons.INGREDIENT, width= 180)
+        self.stock_tarjeta = TarjetaResumen(titulo="Stock Bajo ⚠️", valor=0, icono=AppIcons.WARNING, color="warning", width= 180)
+        self.caducar_tarjeta = TarjetaResumen(titulo="Por Caducar 🕒", valor=0, icono=AppIcons.CALENDAR, color="error", width= 180)
+        self.categorias_tarjeta = TarjetaResumen(titulo="Categorías", valor=0, icono=AppIcons.CATEGORY, color="info", width= 180)
         # ✅ Nueva tarjeta: perecederos/refrigerados próximos a vencer (vida útil
         # más corta => riesgo de pérdida si no se avisa a tiempo).
-        self.fragiles_tarjeta = TarjetaResumen(titulo="Frágiles por Vencer ❄️", valor=0, icono=AppIcons.WARNING, color="error", width= 170)
+        # ⚠️ Título acortado ("Frágiles ❄️" en vez de "Frágiles por Vencer ❄️"):
+        # el original (22 caracteres + emoji) se cortaba/wrappeaba feo
+        # compitiendo con ícono y valor en una tarjeta de 170-190px.
+        self.fragiles_tarjeta = TarjetaResumen(titulo="Frágiles ❄️", valor=0, icono=AppIcons.WARNING, color="error", width= 180)
         self.controls = [
             self.total_tarjeta,
             self.stock_tarjeta,

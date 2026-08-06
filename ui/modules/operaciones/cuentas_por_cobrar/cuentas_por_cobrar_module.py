@@ -99,7 +99,10 @@ class CuentasPorCobrarModule(Module):
     # ------------------------------------------------------------
     def _cargar_cuentas(self):
         if self._texto_busqueda_cuentas.strip():
-            cuentas = self.cuenta_service.buscar(self._texto_busqueda_cuentas.strip())
+            cuentas = self.cuenta_service.buscar(
+                self._texto_busqueda_cuentas.strip(),
+                solo_pendientes=(self._filtro_cuentas != "todas"),
+            )
         elif self._filtro_cuentas == "todas":
             cuentas = self.cuenta_service.listar()
         else:
@@ -117,8 +120,13 @@ class CuentasPorCobrarModule(Module):
         inicio = (self._pagina_cuentas - 1) * self._por_pagina_cuentas
         pagina = grupos[inicio: inicio + self._por_pagina_cuentas]
 
-        estado_por_fila = {g["id_cliente"]: g["peor_estado"] for g in pagina}
-        self.view.poblar_tabla_cuentas(pagina, estado_por_fila)
+        # Antes se armaba un dict {id_cliente: peor_estado} y se lo
+        # pasaba a la vista. Como id_cliente es None para todas las
+        # filas "sin cliente" (deudas viejas), esas filas colisionaban
+        # en la misma key y solo una conservaba su color/estado real.
+        # Ahora el estado va directo en cada grupo (ya lo trae
+        # "peor_estado"), sin diccionario intermedio que pueda chocar.
+        self.view.poblar_tabla_cuentas(pagina)
 
     def _agrupar_por_cliente(self, cuentas):
         """
@@ -287,6 +295,7 @@ class CuentasPorCobrarModule(Module):
             self._cerrar_dialogo()
             self.mensaje(mensaje, tipo="exito" if exito else "error")
             if exito:
+                self._pagina_cuentas = 1
                 self._cargar_cuentas()
 
         dialogo = ft.AlertDialog(

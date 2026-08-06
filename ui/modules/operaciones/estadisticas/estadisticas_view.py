@@ -23,10 +23,13 @@ import flet as ft
 
 from ui.core.services.factory import ServiceFactory
 
-# Paleta cíclica para los charts (barras y torta)
+# Paleta cíclica para los charts (barras y torta).
+# 12 colores para cubrir hasta el límite por defecto de mermas (10)
+# sin que dos secciones consecutivas del pie chart compartan color.
 _PALETA = [
     "#7C5CFC", "#FF8A65", "#4FC3F7", "#81C784",
     "#FFD54F", "#F06292", "#A1887F", "#4DB6AC",
+    "#9575CD", "#FF7043", "#4DD0E1", "#AED581",
 ]
 
 
@@ -168,6 +171,7 @@ class EstadisticasView(ft.Column):
 
         for p in datos:
             porcentaje = float(p["total_unidades"]) / max_ventas
+            total_generado = p["total_generado"] or 0
 
             fila_barra = ft.Column(
                 [
@@ -175,7 +179,7 @@ class EstadisticasView(ft.Column):
                         [
                             ft.Text(p["nombre_producto"], weight="w500", expand=True),
                             ft.Text(
-                                f"{p['total_unidades']} un. (${p['total_generado']:.2f})",
+                                f"{p['total_unidades']} un. (${total_generado:.2f})",
                                 weight="bold",
                             ),
                         ]
@@ -377,6 +381,32 @@ class EstadisticasView(ft.Column):
         )
 
     def _crear_tabla_mermas(self, datos):
+        filas = []
+
+        for m in datos:
+            # SUM(...) puede devolver NULL si no hay filas que agregar
+            # en ese grupo; nos protegemos aquí además de en el
+            # repositorio (COALESCE) por si la query cambia a futuro.
+            cantidad = m["cantidad_perdida"] or 0
+            costo = m["costo_total_perdida"] or 0
+
+            filas.append(
+                ft.DataRow(
+                    cells=[
+                        ft.DataCell(ft.Text(m["item"])),
+                        ft.DataCell(ft.Text(m["motivo"])),
+                        ft.DataCell(ft.Text(str(cantidad))),
+                        ft.DataCell(
+                            ft.Text(
+                                f"${costo:.2f}",
+                                color="red600",
+                                weight="bold",
+                            )
+                        ),
+                    ]
+                )
+            )
+
         tabla = ft.DataTable(
             columns=[
                 ft.DataColumn(ft.Text("Producto / Insumo")),
@@ -384,23 +414,16 @@ class EstadisticasView(ft.Column):
                 ft.DataColumn(ft.Text("Cantidad")),
                 ft.DataColumn(ft.Text("Costo Pérdida ($)")),
             ],
-            rows=[
-                ft.DataRow(
-                    cells=[
-                        ft.DataCell(ft.Text(m["item"])),
-                        ft.DataCell(ft.Text(m["motivo"])),
-                        ft.DataCell(ft.Text(str(m["cantidad_perdida"]))),
-                        ft.DataCell(
-                            ft.Text(
-                                f"${m['costo_total_perdida']:.2f}",
-                                color="red600",
-                                weight="bold",
-                            )
-                        ),
-                    ]
-                )
-                for m in datos
-            ],
+            rows=filas,
         )
 
-        return ft.ListView(controls=[tabla], expand=True)
+        # ListView solo da scroll vertical; envolvemos también en un
+        # Row con scroll horizontal para que la tabla no se recorte
+        # en pantallas angostas si las columnas no entran.
+        return ft.Row(
+            controls=[
+                ft.ListView(controls=[tabla], expand=True),
+            ],
+            scroll=ft.ScrollMode.AUTO,
+            expand=True,
+        )

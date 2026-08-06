@@ -17,7 +17,6 @@ class VentasView(ft.Row):
         on_agregar_producto,
         on_cambiar_cantidad,
         on_eliminar_producto,
-        on_abrir_agregados,
         on_continuar_cobro,
         on_finalizar_venta,
         productos_disponibles,
@@ -29,12 +28,14 @@ class VentasView(ft.Row):
         self.on_agregar_producto = on_agregar_producto
         self.on_cambiar_cantidad = on_cambiar_cantidad
         self.on_eliminar_producto = on_eliminar_producto
-        self.on_abrir_agregados = on_abrir_agregados
         self.on_continuar_cobro = on_continuar_cobro
         self.on_finalizar_venta = on_finalizar_venta
         self.buscar_clientes = buscar_clientes
 
         self.productos_disponibles = productos_disponibles
+        # activos_disponibles se sigue recibiendo y cargando desde
+        # VentasModule (útil para otras cosas y para cuando se reactive la
+        # función de "agregados"), pero por ahora CarritoPanel ya no lo usa.
         self.activos_disponibles = activos_disponibles
 
         # Panel izquierdo (catálogo) – 70%
@@ -47,9 +48,7 @@ class VentasView(ft.Row):
         self.carrito = CarritoPanel(
             on_cambiar_cantidad=self.on_cambiar_cantidad,
             on_eliminar=self.on_eliminar_producto,
-            on_abrir_agregados=self.on_abrir_agregados,
             on_continuar_cobro=self.on_continuar_cobro,
-            activos_disponibles=self.activos_disponibles
         )
 
         # Contenedor izquierdo con borde y padding
@@ -99,11 +98,13 @@ class VentasView(ft.Row):
         self.controls[1].content = self.carrito
         self.update()
 
-    def mostrar_panel_agregados(self, index):
-        """Expande la sección de agregados para la fila del carrito en el índice dado."""
-        # Delegamos al carrito para que expanda la fila correspondiente
-        self.carrito.mostrar_agregados(index)
-        self.update()
+    # NOTA: la función de "agregados" por línea de carrito está oculta
+    # temporalmente (ver ventas_module.py). mostrar_panel_agregados() se
+    # quitó de aquí; de paso, llamaba a self.carrito.mostrar_agregados(index),
+    # un método que CarritoPanel nunca implementó — habría lanzado
+    # AttributeError si alguna vez se hubiera invocado. Al reactivar la
+    # función, conviene resolverlo por el lado de FilaCarrito directamente
+    # (ya tiene su propio _toggle_agregados) en vez de recrear este método.
 
 
 # ------------------------------------------------------------

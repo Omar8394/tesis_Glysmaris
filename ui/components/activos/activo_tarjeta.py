@@ -101,7 +101,7 @@ class TarjetaActivo(ft.Container):
                     ],
                 ),
                 ft.PopupMenuButton(
-                    icon=ft.icons.MORE_VERT,
+                    icon=AppIcons.MORE_VERT,
                     items=self._crear_menu(activo_bool),
                 ),
             ],

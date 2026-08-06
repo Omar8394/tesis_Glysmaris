@@ -1,6 +1,13 @@
 """
 Panel de costos para recetas.
-Solo muestra subtotal de ingredientes y precio sugerido.
+Muestra el costo de materia prima (suma de ingredientes según la
+cantidad utilizada).
+
+Antes también mostraba un "Precio sugerido (x3)" -- un campo de solo
+lectura que multiplicaba el subtotal por un margen fijo de 3. Ese
+cálculo ya no se usa en ningún lado del flujo de recetas (el módulo
+solo pasa el costo de ingredientes), así que el campo era código
+muerto: se eliminó junto con el segundo parámetro de `actualizar()`.
 """
 
 import flet as ft
@@ -14,13 +21,7 @@ class CostosPanel(ft.Container):
         self.border_radius = 5
 
         self.txt_subtotal = ft.TextField(
-            label="Subtotal ingredientes",
-            read_only=True,
-            value="$0.00",
-            width=200,
-        )
-        self.txt_precio_sugerido = ft.TextField(
-            label="Precio sugerido (x3)",
+            label="Costo materia prima",
             read_only=True,
             value="$0.00",
             width=200,
@@ -29,16 +30,12 @@ class CostosPanel(ft.Container):
         self.content = ft.Column(
             [
                 ft.Text("Resumen de costos", weight=ft.FontWeight.BOLD, size=14),
-                ft.Row(
-                    [self.txt_subtotal, self.txt_precio_sugerido],
-                    spacing=20,
-                ),
+                self.txt_subtotal,
             ],
             spacing=10,
         )
 
-    def actualizar(self, subtotal: float, sugerido: float):
-        """Actualiza los valores mostrados."""
-        self.txt_subtotal.value = f"${subtotal:.2f}"
-        self.txt_precio_sugerido.value = f"${sugerido:.2f}"
+    def actualizar(self, costo_ingredientes: float):
+        """Actualiza el costo de materia prima mostrado."""
+        self.txt_subtotal.value = f"${costo_ingredientes:.2f}"
         self.update()

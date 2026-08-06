@@ -87,12 +87,25 @@ class VentasModule(Module):
     # Callbacks para la vista
     # ------------------------------------------------------------
     def agregar_producto(self, producto: dict):
-        """Agrega un producto al carrito (o incrementa cantidad si ya existe)."""
+        """Agrega un producto al carrito (o incrementa cantidad si ya existe).
+
+        Valida contra el stock disponible para no dejar que la falta de
+        stock se descubra recién al finalizar la venta (donde de todos
+        modos VentaRepository._consumir_stock_producto la vuelve a
+        validar como última línea de defensa).
+        """
+        stock = producto.get('stock_actual', 0) or 0
         for item in self.carrito:
             if item['producto']['id_producto'] == producto['id_producto']:
+                if item['cantidad'] + 1 > stock:
+                    MensajeSistema.error(self.page, f"Solo hay {stock} unidades disponibles de {producto.get('nombre', 'este producto')}.")
+                    return
                 item['cantidad'] += 1
                 self.view.actualizar_carrito(self.carrito)
                 return
+        if stock <= 0:
+            MensajeSistema.error(self.page, f"{producto.get('nombre', 'Este producto')} no tiene stock disponible.")
+            return
         self.carrito.append({
             'producto': producto,
             'cantidad': 1,
@@ -106,6 +119,11 @@ class VentasModule(Module):
         if nueva <= 0:
             del self.carrito[index]
         else:
+            stock = self.carrito[index]['producto'].get('stock_actual', 0) or 0
+            if nueva > stock:
+                MensajeSistema.error(self.page, f"Solo hay {stock} unidades disponibles.")
+                self.view.actualizar_carrito(self.carrito)
+                return
             self.carrito[index]['cantidad'] = nueva
         self.view.actualizar_carrito(self.carrito)
 
@@ -114,10 +132,9 @@ class VentasModule(Module):
         del self.carrito[index]
         self.view.actualizar_carrito(self.carrito)
 
-    def abrir_agregados(self, index: int):
-        """Muestra el panel de agregados para el producto en el índice dado."""
-        # Delegamos a la vista para que expanda la fila correspondiente
-        self.view.mostrar_panel_agregados(index)
+    # La función de "agregados" por producto (velas, toppers, empaques
+    # personalizados) queda oculta temporalmente; se reactivará en una
+    # versión futura junto con abrir_agregados() y el wiring en VentasView.
 
     def continuar_cobro(self):
         """Cambia al panel de pago con el total calculado."""
@@ -169,22 +186,24 @@ class VentasModule(Module):
             MensajeSistema.error(self.page, resultado.mensaje)
 
     def _calcular_total(self) -> float:
-        """Calcula el total del carrito (productos + agregados).
+        """Calcula el total del carrito.
 
-        precio_venta / costo suelen venir de la base de datos como
-        decimal.Decimal (columnas NUMERIC/DECIMAL). Python no permite
-        mezclar float y Decimal en una misma operación aritmética, así
-        que convertimos explícitamente a float antes de sumar.
+        precio_venta suele venir de la base de datos como decimal.Decimal
+        (columna NUMERIC/DECIMAL). Python no permite mezclar float y
+        Decimal en una misma operación aritmética, así que convertimos
+        explícitamente a float antes de sumar.
+
+        NOTA: la función de "agregados" (velas, toppers, empaques por
+        línea de carrito) está oculta temporalmente; por eso este total
+        no los suma. Debe volver a incluirlos aquí cuando se reactive esa
+        función, y ese mismo cambio debe reflejarse en
+        CarritoPanel.actualizar_carrito para que el total del carrito y
+        el del panel de pago sigan coincidiendo.
         """
         total = 0.0
         for item in self.carrito:
             precio = float(item['producto'].get('precio_venta', 0) or 0)
             total += precio * item['cantidad']
-            for agg in item.get('agregados', []):
-                # agg['costo'] ya es el costo total de esa línea (costo_unitario * cantidad),
-                # calculado en PanelAgregados._agregar — no volver a multiplicar por cantidad aquí.
-                costo = float(agg.get('costo', 0) or 0)
-                total += costo
         return total
 
     # ------------------------------------------------------------
@@ -199,7 +218,6 @@ class VentasModule(Module):
             on_agregar_producto=self.agregar_producto,
             on_cambiar_cantidad=self.cambiar_cantidad,
             on_eliminar_producto=self.eliminar_producto,
-            on_abrir_agregados=self.abrir_agregados,
             on_continuar_cobro=self.continuar_cobro,
             on_finalizar_venta=self.finalizar_venta,
             productos_disponibles=self.productos_disponibles,

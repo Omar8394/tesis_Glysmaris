@@ -147,6 +147,31 @@ class ProduccionRepository(CRUDRepository):
                 term = f"%{filtros['buscar']}%"
                 params.extend([term, term])
 
+        # Una orden 'finalizada' cuyos productos ya se vendieron por
+        # completo cumplió su propósito: no queda nada disponible para
+        # vender, así que se oculta del listado (tablero) para dejar
+        # espacio a la próxima tanda. No se borra nada de la base -- la
+        # orden sigue intacta y consultable puntualmente vía
+        # obtener_orden(id) (historial, estadísticas, etc.), esto solo
+        # afecta qué aparece en listar_ordenes(). Se compara directo
+        # contra PRODUCCION_DETALLE.cantidad_vendida, la misma columna
+        # que VentaRepository mantiene actualizada en cada venta -- no
+        # depende de ningún evento propio de Producción: cada recarga del
+        # tablero ya ve el estado real. filtros["incluir_agotadas"]=True
+        # desactiva este filtro (para poder revisarlas si hace falta).
+        if not (filtros and filtros.get("incluir_agotadas")):
+            query += """
+                AND (
+                    o.estado <> 'finalizada'
+                    OR EXISTS (
+                        SELECT 1 FROM PRODUCCION_DETALLE pd
+                        WHERE pd.id_orden = o.id_orden
+                          AND pd.disponible_venta = 1
+                          AND (pd.cantidad_obtenida - COALESCE(pd.cantidad_vendida, 0)) > 0
+                    )
+                )
+            """
+
         query += " GROUP BY o.id_orden ORDER BY o.fecha_creacion DESC"
 
         cursor = self._cursor()
@@ -292,14 +317,20 @@ class ProduccionRepository(CRUDRepository):
         cursor.execute("""
             INSERT INTO PRODUCCION_SUBPRODUCTOS
                 (id_merma, id_detalle, id_producto_subproducto,
-                 cantidad, unidad)
-            VALUES (%s, %s, %s, %s, %s)
+                 cantidad, unidad, stock_actual)
+            VALUES (%s, %s, %s, %s, %s, %s)
         """, (
             datos["id_merma"],
             datos.get("id_detalle"),
             datos["id_producto_subproducto"],
             datos["cantidad"],
             datos.get("unidad", ""),
+            # ❌ Bug anterior: el service arma "stock_actual" explícitamente
+            # (arranca igual a "cantidad") para que el recuperable quede
+            # disponible como insumo, pero este INSERT lo ignoraba por
+            # completo -- la columna quedaba en su default (0), así que
+            # el recuperable nunca tenía stock real para reutilizar.
+            datos.get("stock_actual", datos["cantidad"]),
         ))
         self._commit()
         return cursor.lastrowid

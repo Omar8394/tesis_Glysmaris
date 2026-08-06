@@ -101,11 +101,11 @@ class ActivoModule(Module):
         )
         self.resumen_activos = TarjetaResumen(
             titulo="Activos", valor=0, icono=AppIcons.CHECK,
-            color=ft.colors.GREEN, width=180
+            color=self.tema.success, width=180
         )
         self.resumen_tipos = TarjetaResumen(
             titulo="Tipos", valor=0, icono=AppIcons.CATEGORY,
-            color=ft.colors.BLUE, width=180
+            color=self.tema.primary, width=180
         )
         self.resumen_row = ft.Row(
             [self.resumen_total, self.resumen_activos, self.resumen_tipos],
@@ -117,8 +117,13 @@ class ActivoModule(Module):
         self.view = ft.Column(
             [
                 self.toolbar,
-                self.resumen_row,
-                ft.Container(content=self.grid, expand=True, padding=AppSpacing.MD),
+                ft.Container(
+                    content=self.resumen_row,
+                    padding=ft.padding.symmetric(
+                        horizontal=AppSpacing.MD, vertical=AppSpacing.SM
+                    ),
+                ),
+                ft.Container(content=self.grid, expand=True),
             ],
             expand=True,
             spacing=0,
@@ -145,15 +150,13 @@ class ActivoModule(Module):
 
     def cargar(self):
         """Carga los activos desde el servicio y aplica filtros/orden."""
-        activos = self.servicio.listar()
-
-        # Filtro por texto
+        # Filtro por texto: se delega en el repositorio (nombre, tipo y
+        # descripción) en vez de filtrar en Python solo por nombre/tipo,
+        # que dejaba la búsqueda por descripción sin efecto.
         if self._filtro_texto:
-            texto = self._filtro_texto.lower()
-            activos = [
-                a for a in activos
-                if texto in a["nombre"].lower() or texto in a["tipo"].lower()
-            ]
+            activos = self.servicio.buscar(self._filtro_texto)
+        else:
+            activos = self.servicio.listar()
 
         # Filtro por tipo
         if self._filtro_tipo and self._filtro_tipo != "Todos":

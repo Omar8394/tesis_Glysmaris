@@ -80,6 +80,8 @@ class TarjetaProducto(ft.Container):
 
         self.on_eliminar = on_eliminar
 
+        self._activo = producto.get("activo", True)
+
         super().__init__(
 
             width=self.ANCHO,
@@ -112,7 +114,7 @@ class TarjetaProducto(ft.Container):
 
     def _construir_contenido(self):
 
-        activo = self.producto.get("activo", True)
+        activo = self._activo
 
         presentaciones = self.producto.get("presentaciones") or []
 
@@ -392,7 +394,7 @@ class TarjetaProducto(ft.Container):
 
             ft.PopupMenuItem(
 
-                text="Desactivar" if activo_o_true(self.producto) else "Activar",
+                text="Desactivar" if self._activo else "Activar",
 
                 icon=ft.icons.VISIBILITY_OFF_OUTLINED,
 
@@ -417,9 +419,3 @@ class TarjetaProducto(ft.Container):
     def _accion(self, callback):
         if callback:
             callback(self.producto)
-
-
-def activo_o_true(producto: dict) -> bool:
-    """Pequeño helper para no repetir `producto.get("activo", True)`."""
-
-    return producto.get("activo", True)

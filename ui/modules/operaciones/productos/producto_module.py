@@ -197,7 +197,13 @@ class ProductoModule:
             productos = resultado.datos or []
 
         self._productos_cache = productos
-        self.filtro_categoria.opciones = ["Todas"] + self._categorias_disponibles()
+        # ✅ Antes esto escribía un atributo Python nuevo ("opciones",
+        # en español) que Selector nunca leía -- el dropdown real
+        # (self.options, en inglés) no se actualizaba nunca, así que
+        # una categoría nueva no aparecía en el filtro hasta reiniciar
+        # la app. Selector.establecer_opciones() actualiza self.options
+        # y refresca el control si ya está montado.
+        self.filtro_categoria.establecer_opciones(["Todas"] + self._categorias_disponibles())
 
         if categoria and categoria != "Todas":
             productos = [p for p in productos if p.get("categoria") == categoria]

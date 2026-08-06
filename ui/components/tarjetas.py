@@ -78,6 +78,8 @@ class _TarjetaBase(ft.Container):
 
         height=None,
 
+        titulo_size=None,
+
     ):
 
         self.tema = ThemeManager.theme
@@ -93,6 +95,8 @@ class _TarjetaBase(ft.Container):
         self._contenido = contenido or []
 
         self._pie = pie
+
+        self._titulo_size = titulo_size 
 
         super().__init__(
 
@@ -177,7 +181,7 @@ class _TarjetaBase(ft.Container):
 
                     self._titulo,
 
-                    size=AppTypography.SECTION_TITLE,
+                    size=self._titulo_size or AppTypography.SECTION_TITLE,
 
                     weight=AppTypography.BOLD,
 
@@ -381,7 +385,7 @@ class TarjetaResumen(_TarjetaBase):
 
                 str(valor),
 
-                size=30,
+                size=28, 
 
                 weight=AppTypography.BOLD,
 
@@ -416,6 +420,8 @@ class TarjetaResumen(_TarjetaBase):
             contenido=contenido,
 
             width=width,
+
+            titulo_size=16, 
 
         )
 

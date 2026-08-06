@@ -25,12 +25,21 @@ from ui.components.buscador import Buscador
 # ============================================================
 
 # Días de anticipación para avisar que algo está por caducar.
-# Los ingredientes perecederos/refrigerados tienen vida útil más corta,
-# así que necesitan avisarse con más cuidado (umbral más chico pero de
-# revisión más frecuente) para no perder el producto.
+# Los ingredientes perecederos/refrigerados tienen vida útil más corta y
+# generan más pérdida si se detectan tarde, así que se avisan con MÁS
+# anticipación (umbral más grande) que los ingredientes normales.
 
-UMBRAL_DIAS_GENERAL = 30
-UMBRAL_DIAS_FRAGIL = 10
+# ✅ Antes: FRAGIL=10 < GENERAL=30. Eso hacía que un perecedero/refrigerado
+# se alertara con MENOS anticipación que uno normal -- lo opuesto a lo que
+# dice el comentario ("necesitan avisarse con más cuidado"). Se invierten
+# los valores: los frágiles ahora avisan con más días de anticipación.
+UMBRAL_DIAS_GENERAL = 10
+UMBRAL_DIAS_FRAGIL = 30
+
+# ✅ Antes este "10" estaba repetido (hardcodeado) en _filtrar_datos() y en
+# _actualizar_resumen(); ahora es una sola constante que también usa
+# _estado_fila() para resaltar filas de bajo stock.
+UMBRAL_STOCK_BAJO = 10
 
 
 def _a_fecha(valor):
@@ -124,10 +133,6 @@ class IngredienteModule:
             mostrar_actualizar=False,  # Opcional: ocultar botón de actualizar
             mostrar_limpiar=True,
         )
-
-    def _filtrar_y_sugerir(self, texto):
-        self._buscar(texto)
-        return self.service.buscar_nombres(texto)
 
     def _crear_toolbar(self):
         # Filtros
@@ -242,9 +247,14 @@ class IngredienteModule:
             self._actualizar_resumen(datos_filtrados, mostrar_alerta=self._primera_carga)
             self._primera_carga = False
 
+            # ✅ Antes se llamaba tanto a self._layout_principal.update()
+            # como a self.page.update() seguidos -- doble trabajo sin
+            # beneficio, ya que layout_principal ya está montado en la
+            # página. Se deja un único update(), con el update de página
+            # como respaldo solo si el layout todavía no existe.
             if self._layout_principal is not None:
                 self._layout_principal.update()
-            if self.page is not None:
+            elif self.page is not None:
                 self.page.update()
         except AssertionError:
             # ✅ Salvaguarda extra por si algún subcomponente llama a
@@ -274,7 +284,7 @@ class IngredienteModule:
                 return False
             if stock and stock != "Todos":
                 valor_stock = item.get("stock_actual", 0) or 0
-                if stock == "Bajo (< 10)" and not (valor_stock < 10):
+                if stock == "Bajo (< 10)" and not (valor_stock < UMBRAL_STOCK_BAJO):
                     return False
                 if stock == "Medio (10-50)" and not (10 <= valor_stock <= 50):
                     return False
@@ -284,25 +294,52 @@ class IngredienteModule:
 
         return [item for item in datos if cumple(item)]
 
+    @staticmethod
+    def _estado(nombre_attr: str):
+        """✅ Acceso defensivo a EstadoFila. Antes se usaba
+        EstadoFila.STOCK_BAJO directamente y como ese miembro no existe en
+        el enum real de ui.components.tabla, la app crasheaba con
+        AttributeError apenas se cargaba la tabla (ver traceback: 'type
+        object EstadoFila has no attribute STOCK_BAJO').
+
+        Con getattr(..., None), si algún nombre de estado no existe en el
+        enum (por ejemplo por un typo o porque tabla.py cambió sus
+        miembros), la fila simplemente no se resalta en vez de tirar abajo
+        toda la carga de la tabla."""
+        return getattr(EstadoFila, nombre_attr, None)
+
     def _estado_fila(self, item):
-        """✅ Resalta visualmente los ingredientes perecederos/refrigerados
-        próximos a vencer (o ya vencidos), ya que su vida útil corta los
-        hace más propensos a generar pérdida si no se detectan a tiempo.
-        Devuelve un estado semántico (str) definido en EstadoFila — el
-        color real de Flet lo decide tabla.py, no este módulo."""
+        """✅ Resalta visualmente:
+        1) ingredientes por vencer o ya vencidos (antes esto SOLO
+           aplicaba a perecederos/refrigerados -- por eso la tarjeta
+           "Por Caducar" del resumen mostraba más ítems de los que en
+           realidad se veían resaltados en la tabla; ahora cualquier
+           ítem que entra dentro del umbral se resalta, y los
+           perecederos/refrigerados vencidos usan un color más urgente),
+        2) ingredientes con poco stock (nuevo, antes no se marcaban).
+
+        Si un ítem cumple varias condiciones a la vez, se prioriza la de
+        vencimiento por sobre la de stock bajo (vencerse es más urgente
+        que tener poco stock). Devuelve un estado semántico (str)
+        definido en EstadoFila -- el color real de Flet lo decide
+        tabla.py, no este módulo."""
 
         fecha_cad = _a_fecha(item.get("fecha_caducidad"))
-        if not fecha_cad:
-            return None
-
-        dias_restantes = (fecha_cad - date.today()).days
         es_fragil = bool(item.get("perecedero")) or bool(item.get("refrigerado"))
-        umbral = UMBRAL_DIAS_FRAGIL if es_fragil else UMBRAL_DIAS_GENERAL
 
-        if dias_restantes < 0:
-            return EstadoFila.VENCIDO_CRITICO if es_fragil else EstadoFila.VENCIDO
-        if dias_restantes < umbral:
-            return EstadoFila.ALERTA if es_fragil else None
+        if fecha_cad:
+            dias_restantes = (fecha_cad - date.today()).days
+            umbral = UMBRAL_DIAS_FRAGIL if es_fragil else UMBRAL_DIAS_GENERAL
+
+            if dias_restantes < 0:
+                return self._estado("VENCIDO_CRITICO") if es_fragil else self._estado("VENCIDO")
+            if dias_restantes < umbral:
+                return self._estado("ALERTA")
+
+        stock_actual = item.get("stock_actual", 0) or 0
+        if stock_actual < UMBRAL_STOCK_BAJO:
+            return self._estado("STOCK_BAJO")
+
         return None
 
     def _poblar_tabla(self, datos):
@@ -329,7 +366,7 @@ class IngredienteModule:
             detalle_fragiles = []
         else:
             total = len(datos)
-            stock_bajo = sum(1 for item in datos if (item.get("stock_actual", 0) or 0) < 10)
+            stock_bajo = sum(1 for item in datos if (item.get("stock_actual", 0) or 0) < UMBRAL_STOCK_BAJO)
             categorias = len(set(item.get("categoria") for item in datos if item.get("categoria")))
 
             hoy = date.today()
@@ -512,7 +549,12 @@ class IngredienteModule:
             # Caso en que el ingrediente ya existe en el catálogo maestro.
             # En lugar de sumarlo matemáticamente en la interfaz, le advertimos al usuario
             # que se abrirá un lote independiente para respetar la estrategia PEPS.
-            stock_actual = item_existente.get("stock_actual", 0) or 0
+            # ✅ item_existente es la fila MAESTRA (INGREDIENTES): no tiene
+            # stock_actual (antes esto siempre daba 0.00). El stock real es
+            # la suma de los lotes vigentes -> obtener_stock_total().
+            id_ingrediente = item_existente.get("id_ingrediente")
+            resultado_stock = self.service.obtener_stock_total(id_ingrediente)
+            stock_actual = resultado_stock.datos if resultado_stock.exito else 0
             stock_nuevo = datos.get("stock", 0) or 0
             
             Dialogo.confirmacion(

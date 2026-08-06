@@ -6,7 +6,7 @@ from ui.core.repositories.operaciones.activo_repository import ActivoRepository
 
 class ActivoService(CRUDService):
     MODALIDADES_VALIDAS = ["por_unidad", "mensual", "por_hora", "por_uso", "porcentaje"]
-    TIPOS_VALIDOS = ["empaque", "utensilio", "herramienta", "servicio", "transporte", "mobiliario", "otro"]
+    TIPOS_VALIDOS = ["empaque", "utensilio", "herramienta", "servicio", "costo_indirecto", "transporte", "mobiliario", "otro"]
     ESTADOS_VALIDOS = ["activo", "inactivo"]
     # Tipos a los que sí les aplica calcular depreciación (requieren vida útil)
     TIPOS_DEPRECIABLES = ["utensilio", "herramienta", "mobiliario"]
@@ -36,12 +36,14 @@ class ActivoService(CRUDService):
             errores["modalidad_costo"] = "Modalidad de costo no válida."
 
         costo = 0.0
+        costo_valido = True
         try:
             costo = float(datos.get("costo_unitario", 0))
             if costo < 0:
                 errores["costo_unitario"] = "El costo no puede ser negativo."
         except (TypeError, ValueError):
             errores["costo_unitario"] = "El costo debe ser un número."
+            costo_valido = False
 
         try:
             stock = float(datos.get("stock_actual", 0))
@@ -58,7 +60,13 @@ class ActivoService(CRUDService):
         # herramienta/mobiliario, ya que pueden ser propios o alquilados.
         modo_adquisicion = datos.get("modo_adquisicion")
         if tipo in self.TIPOS_CON_MODO_ADQUISICION:
-            if modo_adquisicion not in self.MODOS_ADQUISICION_VALIDOS:
+            if not modo_adquisicion:
+                # Compatibilidad con recursos creados antes de que este
+                # campo existiera (quedaron con modo_adquisicion=NULL):
+                # se asume "comprado" en vez de bloquear la validación.
+                modo_adquisicion = "comprado"
+                datos["modo_adquisicion"] = modo_adquisicion
+            elif modo_adquisicion not in self.MODOS_ADQUISICION_VALIDOS:
                 errores["modo_adquisicion"] = "Debes indicar si es comprado o alquilado."
 
         alquilado = (
@@ -91,7 +99,7 @@ class ActivoService(CRUDService):
             valor_residual = float(datos.get("valor_residual", 0) or 0)
             if valor_residual < 0:
                 errores["valor_residual"] = "El valor residual no puede ser negativo."
-            elif valor_residual > costo:
+            elif costo_valido and valor_residual > costo:
                 errores["valor_residual"] = "El valor residual no puede ser mayor al costo unitario."
         except (TypeError, ValueError):
             errores["valor_residual"] = "El valor residual debe ser un número."
@@ -173,11 +181,11 @@ class ActivoService(CRUDService):
     def cambiar_estado(self, identificador: Any, nuevo_estado: str) -> ServiceResult:
         if nuevo_estado not in self.ESTADOS_VALIDOS:
             return ServiceResult.error("Estado no válido.")
-        activo = self.obtener(identificador)
-        if not activo:
-            return ServiceResult.error("Recurso no encontrado.")
-        activo["estado"] = nuevo_estado
-        return self.actualizar(identificador, activo)
+        if not self.repo.existe(identificador):
+            return ServiceResult.error("El recurso no existe.")
+        if self.repo.cambiar_estado(identificador, nuevo_estado):
+            return ServiceResult.ok("Estado actualizado.")
+        return ServiceResult.error("No se pudo cambiar el estado.")
 
     def calcular_depreciacion_mensual(self, identificador: Any) -> float:
         """

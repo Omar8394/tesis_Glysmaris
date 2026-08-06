@@ -167,6 +167,11 @@ class CuentasPorCobrarView(ft.Column):
             ],
             spacing=AppSpacing.SECTION_SPACING,
             expand=True,
+            # Sin esto, cuando aparecen recordatorios (o la pantalla es
+            # baja) el Column se desborda verticalmente y empuja la
+            # tabla y el paginador fuera del área visible, sin forma de
+            # bajar a verlos.
+            scroll=ft.ScrollMode.AUTO,
         )
 
         # --------------------------------------------------------
@@ -217,6 +222,7 @@ class CuentasPorCobrarView(ft.Column):
             ],
             spacing=AppSpacing.SECTION_SPACING,
             expand=True,
+            scroll=ft.ScrollMode.AUTO,
         )
 
         self.tabs = ft.Tabs(
@@ -270,12 +276,15 @@ class CuentasPorCobrarView(ft.Column):
             self.seccion_recordatorios.visible = False
         self.seccion_recordatorios.update()
 
-    def poblar_tabla_cuentas(self, grupos_por_cliente: list[dict], estado_por_fila: dict):
+    def poblar_tabla_cuentas(self, grupos_por_cliente: list[dict]):
         """
         `grupos_por_cliente`: una fila por cliente (ya agrupada/sumada
         por el módulo), no una fila por venta a crédito. `item_id` de
         cada fila es id_cliente, para poder abrir el detalle de todas
-        sus deudas.
+        sus deudas. El estado visual de la fila (`peor_estado`) viene
+        incluido en el propio grupo, así no hace falta un diccionario
+        externo indexado por id_cliente (que puede repetirse/ser None
+        en varias filas y pisar el color de la fila equivocada).
         """
         self.tabla_cuentas.limpiar()
         for grupo in grupos_por_cliente:
@@ -286,7 +295,7 @@ class CuentasPorCobrarView(ft.Column):
             self.tabla_cuentas.agregar_fila(
                 valores,
                 item_id=grupo["id_cliente"],
-                estado=estado_por_fila.get(grupo["id_cliente"]),
+                estado=grupo.get("peor_estado"),
             )
         self.tabla_cuentas.actualizar()
 

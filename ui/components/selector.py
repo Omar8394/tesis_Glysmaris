@@ -118,6 +118,14 @@ class Selector(ft.Dropdown):
             for opcion in opciones
         ]
 
+        # ✅ Antes esto no refrescaba el control visualmente: si el
+        # dropdown ya estaba montado en pantalla (ej. el filtro de
+        # categoría del catálogo), las opciones nuevas quedaban
+        # asignadas en el objeto pero no se veían hasta el próximo
+        # render completo de la página.
+        if self.page:
+            self.update()
+
     def limpiar(self):
         """
         Limpia la selección.

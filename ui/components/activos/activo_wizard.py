@@ -23,6 +23,7 @@ from ui.components.boton import BotonPrimario, BotonSecundario
 from ui.components.productos.stepper import Stepper
 from ui.core.typography import AppTypography
 from ui.core.spacing import AppSpacing
+from ui.core.icons import AppIcons
 
 
 class ActivoWizard(ft.Container):
@@ -63,6 +64,7 @@ class ActivoWizard(ft.Container):
         "herramienta": ["unidad"],
         "mobiliario": ["unidad"],
         "servicio": [],
+        "costo_indirecto": [],
         "transporte": ["litro", "galón", "km", "viaje"],
         "otro": ["unidad"],
     }
@@ -79,8 +81,8 @@ class ActivoWizard(ft.Container):
         self.on_guardar = on_guardar
         self.on_cancelar = on_cancelar
         self.tipos_disponibles = tipos_disponibles or [
-            "empaque", "utensilio", "herramienta",
-            "servicio", "transporte", "mobiliario", "otro"
+            "empaque", "utensilio", "herramienta", "servicio",
+            "costo_indirecto", "transporte", "mobiliario", "otro"
         ]
 
         # --- Paso 1: Información ---
@@ -172,7 +174,6 @@ class ActivoWizard(ft.Container):
             hint="ej: mes, trimestre",
             
         )
-        self.periodo.visible = (self.modalidad.value == "mensual")
         self.ayuda_costo = ft.Text(
             "",
             size=AppTypography.SMALL,
@@ -246,23 +247,23 @@ class ActivoWizard(ft.Container):
         # --- Botones ---
         self.btn_siguiente = BotonPrimario(
             texto="Siguiente",
-            icono=ft.icons.ARROW_FORWARD,
+            icono=AppIcons.NEXT,
             on_click=self._siguiente,
         )
         self.btn_anterior = BotonSecundario(
             texto="Atrás",
-            icono=ft.icons.ARROW_BACK,
+            icono=AppIcons.BACK,
             on_click=self._anterior,
         )
         self.btn_anterior.visible = False
         self.btn_guardar = BotonPrimario(
             texto="Guardar",
-            icono=ft.icons.SAVE,
+            icono=AppIcons.SAVE,
             on_click=self._guardar,
         )
         self.btn_cancelar = BotonSecundario(
             texto="Cancelar",
-            icono=ft.icons.CLOSE,
+            icono=AppIcons.CLOSE,
             on_click=self._cancelar,
         )
 

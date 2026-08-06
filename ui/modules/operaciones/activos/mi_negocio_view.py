@@ -250,6 +250,22 @@ class MiNegocioView(Module):
             expand=False,  # ❗ No expandir
         )
 
+    def _actualizar_desglose(self):
+        """
+        Reconstruye solo la tarjeta de desglose (costo por hora), sin
+        recrear los campos de "Mano de obra". Se usa después de guardar
+        para no perder el foco/cursor del usuario en los campos que
+        acaba de editar, cosa que sí ocurría al llamar cargar() (que
+        recreaba TODOS los controles, incluidos txt_costo_hora y
+        txt_horas_mes, en cada guardado).
+        """
+        if not self.contenedor or len(self.contenedor.controls) < 2:
+            self.cargar()
+            return
+        self.contenedor.controls[1] = self._tarjeta_desglose()
+        if self.layout_principal and self.layout_principal.page:
+            self.layout_principal.update()
+
     # ------------------------------------------------------------
     #  Guardar
     # ------------------------------------------------------------
@@ -272,8 +288,12 @@ class MiNegocioView(Module):
 
         if resultado.exito:
             MensajeSistema.exito(self.page, resultado.mensaje)
+            # Solo se refresca el desglose calculado: los campos de mano
+            # de obra ya reflejan lo que el usuario acaba de guardar, no
+            # hace falta recrearlos (evita que pierdan foco/cursor).
+            self._actualizar_desglose()
         else:
             MensajeSistema.error(self.page, resultado.mensaje)
-
-        # Re-renderizar todo
-        self.cargar()
+            # Hubo un error de validación: sí recargamos todo desde el
+            # servicio para volver a un estado consistente.
+            self.cargar()

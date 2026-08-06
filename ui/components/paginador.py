@@ -55,6 +55,12 @@ class Paginador(ft.Row):
 
         self.btn_primero = ft.IconButton(
 
+            # ✅ BUG: `ft.icons` (minúscula) ya no existe con contenido en
+            # versiones recientes de Flet -- lanzaba AttributeError al
+            # construir el control. El enum correcto ahora es `ft.Icons`
+            # (mayúscula). Con esto roto, este componente nunca podía
+            # instanciarse, lo cual explica por qué en reporte_module.py
+            # quedó como `paginador=None` en vez de conectado.
             icon=ft.icons.FIRST_PAGE,
 
             on_click=self._primera,

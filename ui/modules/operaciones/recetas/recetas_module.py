@@ -166,7 +166,6 @@ class RecetasModule:
         self.form.on_relleno_changed = lambda id_r: self._sincronizar_componente("relleno", id_r)
         self.form.on_cobertura_changed = lambda id_r: self._sincronizar_componente("cobertura", id_r)
 
-        self.form.on_calcular = self._recalcular_costos
         self.form.on_guardar = self._guardar
         self.form.on_nuevo = self._nueva_receta
         self.form.on_cancelar = self._cancelar_edicion
@@ -382,9 +381,16 @@ class RecetasModule:
             "Desconocido",
         )
 
-        self._ingredientes = self.service.agregar_ingrediente(
-            self._ingredientes, id_ing, nombre_ing, cantidad, datos["unidad"],
-        )
+        try:
+            self._ingredientes = self.service.agregar_ingrediente(
+                self._ingredientes, id_ing, nombre_ing, cantidad, datos["unidad"],
+            )
+        except ValueError as e:
+            MensajeSistema.advertencia(
+                self.page,
+                f"No se pudo agregar '{nombre_ing}': {e}",
+            )
+            return
 
         self.form.txt_cantidad.value = ""
         self.form.dd_ingrediente.value = None
@@ -424,10 +430,7 @@ class RecetasModule:
         except ValueError as e:
             MensajeSistema.advertencia(self.page, f"No se pudo calcular el costo: {e}")
             subtotal = 0
-        # TODO: cuando actualicemos recetas_form.py, sacar el segundo
-        # parámetro (era "precio sugerido", que ya no se usa) y dejar
-        # actualizar_costos con un solo valor: el costo de ingredientes.
-        self.form.actualizar_costos(subtotal, subtotal)
+        self.form.actualizar_costos(subtotal)
 
     def _refrescar_ingredientes(self):
         self.form.mostrar_ingredientes(self._ingredientes)
@@ -460,10 +463,13 @@ class RecetasModule:
         # Verificación de stock: informativa, no bloquea el guardado.
         resultado_stock = self.service.verificar_stock(self._ingredientes)
 
-        if resultado_stock.datos:
+        if not resultado_stock.exito:
+            MensajeSistema.advertencia(self.page, resultado_stock.mensaje)
+        elif resultado_stock.datos:
 
             detalle = ", ".join(
-                f"{f['ingrediente']} (stock {f['stock']}, solicitado {f['solicitado']})"
+                f"{f['ingrediente']}: {f['error']}" if "error" in f
+                else f"{f['ingrediente']} (stock {f['stock']}, solicitado {f['solicitado']})"
                 for f in resultado_stock.datos
             )
 

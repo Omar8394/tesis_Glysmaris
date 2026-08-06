@@ -186,6 +186,11 @@ class IngredienteFormulario(ft.UserControl):
         # base (no cantidad de artículos) -- ver comentario en __init__.
         self._es_edicion = True
         self.nombre.establecer(datos.get("nombre_ingrediente", ""))
+        # ✅ El significado de "Stock" cambia según el modo (ver __init__).
+        # Si no actualizamos etiqueta/hint acá, una instancia reutilizada
+        # para editar seguía mostrando el texto de modo "crear".
+        self.stock.label = "Stock actual"
+        self.stock.hint = None
         self.stock.value = str(datos.get("stock_actual", ""))
         self.unidad.value = datos.get("unidad_medida")
         self.costo.value = str(datos.get("costo_unitario", ""))

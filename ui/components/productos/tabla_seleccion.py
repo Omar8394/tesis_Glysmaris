@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import flet as ft
 
+from ui.core.theme_manager import ThemeManager
+
 
 class TablaSeleccion(ft.Container):
     """
@@ -46,6 +48,8 @@ class TablaSeleccion(ft.Container):
 
         super().__init__(expand=True)
 
+        self.tema = ThemeManager.theme
+
         self.columnas = columnas or [
 
             ("nombre", "Nombre"),
@@ -68,7 +72,7 @@ class TablaSeleccion(ft.Container):
 
             data_row_min_height=40,
 
-            border=ft.border.all(1, ft.colors.OUTLINE_VARIANT),
+            border=ft.border.all(1, self.tema.border),
 
             columns=[
 
@@ -91,7 +95,7 @@ class TablaSeleccion(ft.Container):
 
             border_radius=10,
 
-            border=ft.border.all(1, ft.colors.OUTLINE_VARIANT),
+            border=ft.border.all(1, self.tema.border),
 
             padding=10,
 
@@ -164,7 +168,7 @@ class TablaSeleccion(ft.Container):
 
                 icon=ft.icons.DELETE_OUTLINE,
 
-                icon_color=ft.colors.RED,
+                icon_color=self.tema.error,
 
                 tooltip="Quitar",
 

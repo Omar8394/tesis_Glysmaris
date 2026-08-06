@@ -2,7 +2,12 @@ import flet as ft
 from ui.components.campo_texto import CampoTexto
 from ui.core.typography import AppTypography
 from ui.core.spacing import AppSpacing
-from ui.components.ventas.panel_agregados import PanelAgregados
+
+# NOTA: la función de "agregados" (velas, toppers, empaques personalizados
+# por línea de carrito) se OCULTA temporalmente. El componente
+# ui.components.ventas.panel_agregados.PanelAgregados se conserva en el
+# proyecto para reactivarla en una versión futura, pero esta fila ya no
+# lo instancia ni lo referencia.
 
 class FilaCarrito(ft.Container):
     def __init__(
@@ -14,8 +19,6 @@ class FilaCarrito(ft.Container):
         personalizado,
         on_cantidad_changed,
         on_eliminar,
-        on_abrir_agregados,
-        activos_disponibles
     ):
         self.index = index
         self.producto = producto
@@ -24,8 +27,6 @@ class FilaCarrito(ft.Container):
         self.personalizado = personalizado
         self.on_cantidad_changed = on_cantidad_changed
         self.on_eliminar = on_eliminar
-        self.on_abrir_agregados = on_abrir_agregados
-        self.activos_disponibles = activos_disponibles
 
         self.campo_cantidad = CampoTexto(
             value=str(self.cantidad),
@@ -35,24 +36,6 @@ class FilaCarrito(ft.Container):
         )
 
         self.subtotal = ft.Text(f"${producto['precio_venta'] * cantidad:.2f}", weight="bold")
-
-        self.texto_btn_agregados = ft.Text("⚙ Agregados", size=AppTypography.SMALL)
-        self.btn_agregados = ft.TextButton(
-            content=self.texto_btn_agregados,
-            on_click=self._toggle_agregados,
-        )
-        if self.agregados:
-            self.texto_btn_agregados.value = f"⚙ Agregados ({len(self.agregados)})"
-
-        # Contenedor de agregados (expandible)
-        self.panel_agregados = PanelAgregados(
-            index=self.index,
-            agregados=self.agregados,
-            activos_disponibles=self.activos_disponibles,
-            on_agregar_agregado=self._agregar_agregado,
-            on_quitar_agregado=self._quitar_agregado,
-        )
-        self.panel_agregados.visible = False
 
         super().__init__(padding=AppSpacing.SM, border=ft.border.only(bottom=ft.border.BorderSide(1, "gray")))
 
@@ -68,8 +51,6 @@ class FilaCarrito(ft.Container):
                     on_click=lambda e: self.on_eliminar(self.index)
                 )
             ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-            ft.Row([self.btn_agregados], alignment=ft.MainAxisAlignment.END),
-            self.panel_agregados,
         ])
 
     def _cambiar_cantidad(self, e):
@@ -94,21 +75,3 @@ class FilaCarrito(ft.Container):
 
         self.cantidad = nueva
         self.on_cantidad_changed(self.index, nueva)
-
-    def _toggle_agregados(self, e):
-        self.panel_agregados.visible = not self.panel_agregados.visible
-        self.update()
-
-    def _agregar_agregado(self, agregado):
-        # Agregar a la lista de agregados y notificar al módulo
-        self.agregados.append(agregado)
-        self.on_abrir_agregados(self.index)  # o un callback específico para actualizar
-        # Actualizar el texto del botón
-        self.texto_btn_agregados.value = f"⚙ Agregados ({len(self.agregados)})"
-        self.update()
-
-    def _quitar_agregado(self, idx):
-        del self.agregados[idx]
-        self.on_abrir_agregados(self.index)
-        self.texto_btn_agregados.value = f"⚙ Agregados ({len(self.agregados)})" if self.agregados else "⚙ Agregados"
-        self.update()

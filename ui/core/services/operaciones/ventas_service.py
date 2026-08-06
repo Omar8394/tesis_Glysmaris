@@ -57,15 +57,15 @@ class VentaService(CRUDService):
         # Enlaza (o crea) el cliente en CLIENTES cuando se capturó algún
         # dato suyo, para que la venta y, si aplica, la deuda queden
         # trazables hacia CLIENTES.id_cliente y no solo como texto suelto.
-        id_cliente = None
-        if self._cliente_service and (cliente.get('nombre') or cliente.get('cedula')):
+        id_cliente = cliente.get('id_cliente')
+        if id_cliente is None and self._cliente_service and (cliente.get('nombre') or cliente.get('cedula')):
             registro_cliente = self._cliente_service.obtener_o_crear_por_cedula(
                 cedula=cliente.get('cedula', ''),
                 nombre=cliente.get('nombre', ''),
                 telefono=cliente.get('telefono', ''),
             )
             id_cliente = registro_cliente.get('id_cliente')
-        elif monto_credito > 0 and not self._cliente_service:
+        elif id_cliente is None and monto_credito > 0 and not self._cliente_service:
             return ServiceResult.error(
                 "No se puede registrar una venta a crédito: falta configurar ClienteService."
             )
@@ -81,30 +81,22 @@ class VentaService(CRUDService):
             precio_unitario = float(producto.get('precio_venta', 0) or 0)
             subtotal_producto = precio_unitario * cantidad
 
-            agregados = []
-            for agg in item.get('agregados', []):
-                cantidad_agg = agg.get('cantidad', 1)
-                # agg['costo'] también puede venir como Decimal (costo_unitario * cantidad
-                # calculado en PanelAgregados._agregar).
-                sub_agg = float(agg.get('costo', 0) or 0)
-                agregados.append({
-                    'id_activo': agg['id_activo'],
-                    'nombre_activo': agg['nombre'],
-                    'cantidad': cantidad_agg,
-                    'costo_unitario': sub_agg / cantidad_agg if cantidad_agg else sub_agg,
-                    'subtotal': sub_agg,
-                })
-                subtotal_producto += sub_agg
-
+            # La función de "agregados" (velas, toppers, empaques por línea
+            # de carrito) está oculta temporalmente (ver ventas_module.py /
+            # fila_carrito.py), así que aquí ya no se procesan ni se suman
+            # al subtotal. VentaRepository sigue aceptando 'agregados': []
+            # sin problema, así que reactivar esto en el futuro solo
+            # requiere volver a poblar esta lista con costo_unitario/subtotal
+            # por agregado.
             items.append({
                 'id_producto': producto['id_producto'],
-                'nombre_producto': producto['nombre_producto'] if 'nombre_producto' in producto else producto.get('nombre'),
+                'nombre_producto': producto.get('nombre'),
                 'categoria': producto.get('categoria'),
                 'presentacion': (producto.get('presentacion_seleccionada') or {}).get('nombre'),
                 'cantidad': cantidad,
                 'precio_unitario': precio_unitario,
                 'subtotal': subtotal_producto,
-                'agregados': agregados,
+                'agregados': [],
             })
             subtotal_general += subtotal_producto
 

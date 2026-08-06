@@ -30,6 +30,14 @@ class DetalleProduccion:
     id_presentacion: Optional[int] = None
     cantidad_planificada: int = 1
     cantidad_obtenida: int = 0
+    # Cuánto de cantidad_obtenida ya vendió Ventas (VentaRepository la
+    # incrementa en cada venta); stock disponible = cantidad_obtenida - esto.
+    cantidad_vendida: int = 0
+    # Peso/volumen real que se quiere producir para este detalle (ej.
+    # "torta de 1.5 kg"), solo cuando la receta del producto rinde en
+    # masa/volumen en vez de "unidad". Columnas reales de PRODUCCION_DETALLE.
+    peso_objetivo: Optional[float] = None
+    unidad_objetivo: Optional[str] = None
     precio_final: float = 0.0
     modificaciones: str = ""
     costo_calculado: float = 0.0
@@ -43,8 +51,13 @@ class MermaProduccion:
     id_detalle: Optional[int] = None
     id_producto: Optional[int] = None
     cantidad: float = 0.0
+    unidad: Optional[str] = None
     tipo_merma: str = "no_recuperable"  # recuperable, no_recuperable
     motivo: str = "otro"  # quemado, rotura, contaminacion, error_preparacion, decoracion, otro
+    # Solo aplica cuando tipo_merma='recuperable': nombre de lo que quedó
+    # (ej. "trozos de torta"), con el que se crea/identifica el producto
+    # recuperable en PRODUCCION_SUBPRODUCTOS.
+    nombre_recuperado: Optional[str] = None
     descripcion: str = ""
     costo_asociado: float = 0.0
     fecha_registro: Optional[datetime] = field(default_factory=datetime.now)
@@ -57,6 +70,11 @@ class SubproductoProduccion:
     id_producto_subproducto: int = 0
     cantidad: float = 0.0
     unidad: str = ""
+    # Stock del recuperable todavía disponible para usarse como
+    # componente de otro producto (arranca en "cantidad" y baja a medida
+    # que se consume). Ver bug corregido en
+    # ProduccionRepository.crear_subproducto, que antes no lo guardaba.
+    stock_actual: float = 0.0
     fecha_registro: Optional[datetime] = field(default_factory=datetime.now)
 
 @dataclass

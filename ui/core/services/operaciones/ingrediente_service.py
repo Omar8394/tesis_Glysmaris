@@ -51,12 +51,29 @@ class IngredienteService(CRUDService):
     def obtener_por_nombre(self, nombre: str) -> ServiceResult:
         """✅ Para detectar si ya existe un ingrediente con ese nombre
         (sin importar mayúsculas/minúsculas) antes de crear uno nuevo.
-        Devuelve exito=True con datos=None si simplemente no existe."""
+        Devuelve exito=True con datos=None si simplemente no existe.
+
+        ⚠️ El dict que devuelve es la fila del ingrediente MAESTRO
+        (INGREDIENTES), que no tiene columna stock_actual -- eso vive en
+        LOTES_INVENTARIO. Para el stock real acumulado usar
+        obtener_stock_total()."""
         try:
             if not nombre or not nombre.strip():
                 return ServiceResult.ok(datos=None)
             dato = self._repository.obtener_por_nombre(nombre)
             return ServiceResult.ok(datos=dato)
+        except Exception as ex:
+            return ServiceResult.error(str(ex))
+
+    def obtener_stock_total(self, id_ingrediente: int) -> ServiceResult:
+        """✅ Suma el stock de todos los lotes vigentes de un ingrediente.
+        Antes, para armar el mensaje de "Registrar Nuevo Lote", el módulo
+        leía stock_actual directamente del resultado de obtener_por_nombre()
+        -- esa clave nunca existe ahí, así que el mensaje siempre mostraba
+        "0.00" sin importar el stock real."""
+        try:
+            total = self._repository.obtener_stock(id_ingrediente)
+            return ServiceResult.ok(datos=total)
         except Exception as ex:
             return ServiceResult.error(str(ex))
 
@@ -211,7 +228,13 @@ class IngredienteService(CRUDService):
                 )
             else:
                 mensaje = (
-                    "Se eliminó el lote por completo."
+                    # ✅ El lote NO se borra de LOTES_INVENTARIO acá (solo
+                    # queda con stock_actual=0 y listar() lo filtra por
+                    # `WHERE stock_actual > 0`). El mensaje anterior decía
+                    # "se eliminó el lote", lo cual podía confundir a futuro
+                    # si alguien arma un reporte histórico basado en "lotes
+                    # eliminados" de verdad.
+                    "Se registró la pérdida total del lote (stock en 0)."
                     if es_perdida_total
                     else f"Se registró la pérdida de {cantidad:.2f} unidades del lote."
                 )
@@ -271,8 +294,15 @@ class IngredienteService(CRUDService):
             return ServiceResult.error(str(ex))
 
     def validar(self, datos: Dict[str, Any]) -> tuple[bool, str]:
-        if not datos.get("nombre", "").strip():
+        # ✅ AutoCompletado.obtener() puede devolver None (no solo "") cuando
+        # el campo está vacío. Antes esto hacía `.strip()` sobre None y
+        # tiraba AttributeError en vez de mostrar el mensaje de validación.
+        if not (datos.get("nombre") or "").strip():
             return False, "El nombre es obligatorio."
+        if not datos.get("unidad"):
+            return False, "La unidad de medida es obligatoria."
+        if not datos.get("categoria"):
+            return False, "La categoría es obligatoria."
         if datos.get("stock", 0) < 0:
             return False, "El stock no puede ser negativo."
         if datos.get("costo", 0) < 0:

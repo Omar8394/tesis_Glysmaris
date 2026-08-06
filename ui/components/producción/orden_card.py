@@ -67,7 +67,8 @@ class OrdenCard(ft.Card):
         estado = orden.get("estado", "pendiente")
         prioridad = orden.get("prioridad", "media")
         
-        # Color según prioridad
+        # Color según prioridad (se usa solo para el badge de prioridad,
+        # no para el ícono/texto de estado -- ver comentario más abajo).
         colores_prioridad = {
             "baja": ft.colors.BLUE,
             "media": ft.colors.GREEN,
@@ -76,14 +77,29 @@ class OrdenCard(ft.Card):
         }
         color_prioridad = colores_prioridad.get(prioridad, ft.colors.GREY)
 
-        # Icono según estado
+        # Icono y color según estado.
+        # ❌ Bug anterior: el ícono de estado (que representa
+        # pendiente/en_proceso/finalizada/cancelada) se pintaba con
+        # color_prioridad, así que por ejemplo una orden finalizada con
+        # prioridad urgente mostraba un check en rojo (parece un error)
+        # y una cancelada con prioridad baja se veía en azul en vez de
+        # rojo. Ahora cada cosa tiene su propio color: el ícono/texto de
+        # estado usa colores_estado, y la prioridad se muestra aparte
+        # como un badge chico con colores_prioridad.
         iconos_estado = {
             "pendiente": ft.icons.HOURGLASS_TOP,
             "en_proceso": ft.icons.PLAY_CIRCLE,
             "finalizada": ft.icons.CHECK_CIRCLE,
             "cancelada": ft.icons.CANCEL,
         }
+        colores_estado = {
+            "pendiente": ft.colors.AMBER,
+            "en_proceso": ft.colors.BLUE,
+            "finalizada": ft.colors.GREEN,
+            "cancelada": ft.colors.RED,
+        }
         icono_estado = iconos_estado.get(estado, ft.icons.HELP)
+        color_estado = colores_estado.get(estado, ft.colors.GREY)
 
         # Fecha
         fecha = orden.get("fecha_planificada", "")
@@ -110,10 +126,26 @@ class OrdenCard(ft.Card):
                             weight="bold",
                         ),
                         ft.Container(expand=True),
-                        ft.Icon(icono_estado, size=16, color=color_prioridad),
-                        ft.Text(estado.capitalize(), size=12, color=color_prioridad),
+                        ft.Icon(icono_estado, size=16, color=color_estado),
+                        ft.Text(estado.capitalize(), size=12, color=color_estado),
                     ],
                     spacing=4,
+                ),
+                ft.Row(
+                    [
+                        ft.Container(expand=True),
+                        ft.Container(
+                            content=ft.Text(
+                                prioridad.capitalize(),
+                                size=11,
+                                color=ft.colors.WHITE,
+                                weight="bold",
+                            ),
+                            bgcolor=color_prioridad,
+                            padding=ft.padding.symmetric(horizontal=8, vertical=2),
+                            border_radius=10,
+                        ),
+                    ],
                 ),
                 ft.Divider(height=2),
                 # Cuerpo: cantidad, fecha, responsable
@@ -272,6 +304,20 @@ class OrdenCard(ft.Card):
 
         elif estado == "finalizada":
             # Finalizada: Ver detalle (solo detalle)
+            if self.on_ver_detalle:
+                botones.append(
+                    BotonSecundario(
+                        texto="Ver Detalles",
+                        icono=AppIcons.EYE,
+                        on_click=lambda e: self._ejecutar_callback(self.on_ver_detalle),
+                        expand=True,
+                        width=None,
+                    )
+                )
+
+        elif estado == "cancelada":
+            # Cancelada: solo detalle (antes no había ninguna rama para
+            # este estado y la tarjeta caía en "Sin acciones disponibles").
             if self.on_ver_detalle:
                 botones.append(
                     BotonSecundario(

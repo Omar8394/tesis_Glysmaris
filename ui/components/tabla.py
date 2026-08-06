@@ -83,15 +83,27 @@ class EstadoFila:
     ALERTA = "alerta"
     VENCIDO = "vencido"
     VENCIDO_CRITICO = "vencido_critico"
+    # ✅ Nuevo: antes IngredienteModule intentaba usar EstadoFila.STOCK_BAJO
+    # y esto tiraba AttributeError porque no existía acá. Se agrega para
+    # poder resaltar filas con poco stock, no solo las próximas a vencer.
+    STOCK_BAJO = "stock_bajo"
 
 
 # ✅ En Flet 22.1 el módulo de colores se llama 'colors' (minúscula), no
 # 'Colors' (eso se introdujo recién en versiones más nuevas, 0.24+).
 # Usar ft.Colors acá tira: AttributeError: module 'flet' has no attribute 'Colors'.
+#
+# ✅ Los tonos "_50"/"_100" originales (AMBER_50, ORANGE_100, RED_100) son
+# demasiado claros sobre fondo blanco y pasan desapercibidos. Se subieron
+# un par de escalones (_200/_300) para que el resaltado se note de verdad,
+# sin llegar a un color tan saturado que tape el texto de la fila.
 _COLORES_POR_ESTADO = {
-    EstadoFila.ALERTA: ft.colors.AMBER_50,
-    EstadoFila.VENCIDO: ft.colors.ORANGE_100,
-    EstadoFila.VENCIDO_CRITICO: ft.colors.RED_100,
+    EstadoFila.ALERTA: ft.colors.AMBER_200,
+    EstadoFila.VENCIDO: ft.colors.ORANGE_300,
+    EstadoFila.VENCIDO_CRITICO: ft.colors.RED_300,
+    # Tono distinto (violeta) para que "poco stock" no se confunda
+    # visualmente con los estados de vencimiento (ámbar/naranja/rojo).
+    EstadoFila.STOCK_BAJO: ft.colors.DEEP_PURPLE_100,
 }
 
 
@@ -209,6 +221,22 @@ class _TablaBase(ft.Container):
     def limpiar(self):
 
         self.data_table.rows.clear()
+
+    def establecer_columnas(self, columnas):
+        """
+        Reemplaza las columnas de la tabla y reconstruye los encabezados.
+
+        Reasignar `self.columnas` directamente (self._tabla.columnas = ...)
+        no alcanza: _crear_columnas() solo se ejecuta una vez, en
+        __init__, así que el encabezado visual (self.data_table.columns)
+        se queda con las columnas viejas aunque el atributo Python haya
+        cambiado. Este método actualiza el atributo Y reconstruye el
+        encabezado, y limpia las filas porque ya no corresponden a las
+        columnas nuevas.
+        """
+        self.columnas = columnas
+        self._crear_columnas()
+        self.limpiar()
 
     def actualizar(self):
 

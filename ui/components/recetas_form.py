@@ -15,30 +15,22 @@ class RecetasForm(ft.Container):
         "Otro",
     ]
 
+    # Unidades básicas de medida. Se usan tanto para los ingredientes de
+    # la receta como para el rendimiento. Antes existían además medidas
+    # caseras (taza, 1/2 taza, cucharada, cucharadita) y estaban
+    # duplicadas en dos listas distintas (UNIDADES / UNIDADES_RENDIMIENTO);
+    # se unificaron en una sola lista para evitar errores de conversión:
+    # una "taza" no pesa/mide lo mismo según el ingrediente, y ese
+    # desajuste entre lo que ofrecía el formulario (ej. "1 taza") y lo
+    # que reconocía el servicio (solo "taza") producía errores al
+    # calcular costos. Con unidades de medida básicas y sin ambigüedad
+    # (g, kg, ml, L, unidad) se elimina esa fuente de errores.
     UNIDADES = [
         "g",
         "kg",
         "ml",
         "L",
         "unidad",
-        "1 taza",
-        "1/2 taza",
-        "1/3 taza",
-        "1/4 taza",
-        "cucharada",
-        "cucharadita",
-    ]
-
-    # Unidades permitidas para el rendimiento de la receta. No se
-    # incluyen fracciones de taza/cucharadas acá porque el rendimiento
-    # se usa luego para escalar producción (necesita una unidad de masa,
-    # volumen o conteo "limpia", no una medida casera fraccionada).
-    UNIDADES_RENDIMIENTO = [
-        "unidad",
-        "g",
-        "kg",
-        "ml",
-        "L",
     ]
 
     TITULOS_ORIGEN = {
@@ -55,7 +47,6 @@ class RecetasForm(ft.Container):
         self.on_guardar = None
         self.on_nuevo = None
         self.on_cancelar = None
-        self.on_calcular = None
 
         self.on_base_changed = None
         self.on_relleno_changed = None
@@ -93,7 +84,7 @@ class RecetasForm(ft.Container):
             label="Unidad de rendimiento",
             width=200,
             value="unidad",
-            options=[ft.dropdown.Option(x) for x in self.UNIDADES_RENDIMIENTO],
+            options=[ft.dropdown.Option(x) for x in self.UNIDADES],
         )
 
         # ---------------------------------------------------
@@ -434,7 +425,7 @@ class RecetasForm(ft.Container):
         self.mostrar_ingredientes([])
         self._habilitar_dropdowns(None)
         # Limpiar también el panel de costos
-        self.panel_costos.actualizar(0.0, 0.0)
+        self.panel_costos.actualizar(0.0)
 
     def modo_edicion(self, activo=True):
         self.btn_cancelar.visible = activo
@@ -446,6 +437,13 @@ class RecetasForm(ft.Container):
     # ACTUALIZAR COSTOS (desde el módulo)
     # =========================================================
 
-    def actualizar_costos(self, subtotal: float, sugerido: float):
-        """Actualiza el panel de costos con nuevos valores."""
-        self.panel_costos.actualizar(subtotal, sugerido)
+    def actualizar_costos(self, costo_ingredientes: float):
+        """
+        Actualiza el panel de costos con el costo de materia prima.
+
+        Antes recibía un segundo valor ("precio sugerido", calculado
+        multiplicando el costo por 3). Ese campo era código muerto: ya
+        no se usa ningún margen fijo, el único dato relevante es el
+        costo real de la materia prima según la cantidad utilizada.
+        """
+        self.panel_costos.actualizar(costo_ingredientes)

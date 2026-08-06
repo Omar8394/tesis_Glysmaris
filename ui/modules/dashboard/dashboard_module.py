@@ -35,6 +35,7 @@ from ui.modules.operaciones.activos.mi_negocio import mi_negocio_view
 from ui.modules.operaciones.ventas.ventas import ventas_view
 from ui.modules.operaciones.estadisticas.estadisticas import estadisticas_view
 from ui.modules.operaciones.cuentas_por_cobrar.cuentas_por_cobrar import cuentas_por_cobrar_view
+from ui.modules.operaciones.reportes.reporte import reporte_view  # nuevo
 
 class DashboardModule:
 
@@ -43,6 +44,7 @@ class DashboardModule:
         self.content_area = content_area
         self.usuario_actual = usuario_actual
         self._module_ingredientes = None
+        self._sidebar_expanded = True  # estado del sidebar
         self.sidebar = None
         self._crear_sidebar()
 
@@ -51,33 +53,19 @@ class DashboardModule:
     # ============================================================
 
     def construir(self):
-
         self._cargar_modulo_inicial()
-
         resultado = DashboardLayout(
             sidebar=self.sidebar,
             contenido=self.content_area,
         )
-
-        # Guardamos una referencia al módulo en el propio control devuelto
-        # para poder llamar a cargar_datos_iniciales() una vez que quien
-        # nos invoque (App.py) ya haya hecho page.add(resultado) + page.update().
         resultado.dashboard_module = self
         return resultado
 
     def cargar_datos_iniciales(self) -> None:
-        """Debe llamarse DESPUÉS de que este control ya fue agregado a la
-        página (page.add(...) + page.update()). Antes de eso, cargar()
-        no puede refrescar la UI porque los controles no tienen `.page`."""
         if self._module_ingredientes:
             self._module_ingredientes.cargar()
 
     def _cargar_modulo_inicial(self) -> None:
-        """Carga el módulo inicial (Ingredientes) sin llamar a update()
-        de content_area -- todavía no fue agregado a la página en este
-        punto (construir() se ejecuta ANTES de page.add()). Llamar
-        update() acá provoca:
-        AssertionError: Control must be added to the page first."""
         layout, module = ingredientes_view(self.page, self.content_area)
         self._module_ingredientes = module
         self.content_area.content = layout
@@ -87,45 +75,188 @@ class DashboardModule:
     # ============================================================
 
     def _crear_sidebar(self) -> None:
+        """Crea el contenedor del sidebar y lo construye por primera vez."""
+        self.sidebar = ft.Container(
+            width=260 if self._sidebar_expanded else 60,
+            bgcolor=ThemeManager.theme.sidebar,
+            padding=AppSpacing.SIDEBAR_PADDING,
+            animate=ft.animation.Animation(300, ft.AnimationCurve.EASE_IN_OUT),
+        )
+        self._rebuild_sidebar()
 
-        self._sidebar_items = [
-            ("Ingredientes", AppIcons.INGREDIENT, self._ir_ingredientes),
-            ("Recetas", AppIcons.RECIPE, self._ir_recetas),
-            ("Productos", AppIcons.PRODUCT, self._ir_productos),
-            ("Recursos del Negocio", AppIcons.INVENTARIO, self._ir_recursos),
+    def _rebuild_sidebar(self) -> None:
+        """Reconstruye el contenido del sidebar según el estado expandido/colapsado."""
+        items = self._build_items()
+
+        if self._sidebar_expanded:
+            # ... construir items expandidos ...
+            self.sidebar.width = 260
+            self.sidebar.padding = AppSpacing.SIDEBAR_PADDING
+            self.sidebar.content = ft.Column(
+                [
+                    self._build_header(),
+                    ft.Divider(),
+                    *items,
+                ],
+                spacing=AppSpacing.CONTROL_SPACING,
+            )
+        else:
+            # ... construir items colapsados ...
+            self.sidebar.width = 60
+            self.sidebar.padding = AppSpacing.SIDEBAR_PADDING_COLLAPSED
+            self.sidebar.content = ft.Column(
+                [
+                    self._build_header(),
+                    ft.Divider(),
+                    *items,
+                ],
+                spacing=AppSpacing.CONTROL_SPACING,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            )
+
+        # Solo actualizar si el control ya está en la página
+        if self.sidebar.page:
+            self.sidebar.update()
+
+    def _build_header(self):
+        """Construye la fila superior del sidebar con el botón de alternar y el título."""
+        toggle_icon = ft.icons.MENU if self._sidebar_expanded else ft.icons.MENU_OPEN
+        toggle_button = ft.IconButton(
+            icon=toggle_icon,
+            icon_color=ThemeManager.theme.text_secondary,
+            on_click=self._toggle_sidebar,
+            tooltip="Colapsar/Expandir",
+        )
+
+        if self._sidebar_expanded:
+            title = ft.Text(
+                "La Dulce Tía",
+                size=20,
+                weight="bold",
+                color=ThemeManager.theme.primary,
+            )
+            return ft.Row(
+                [toggle_button, title],
+                spacing=AppSpacing.SM,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            )
+        else:
+            # Solo el botón
+            return ft.Row(
+                [toggle_button],
+                alignment=ft.MainAxisAlignment.CENTER,
+            )
+
+    def _build_items(self):
+        """Construye la lista de items del menú según el estado."""
+        if self._sidebar_expanded:
+            return self._build_items_expanded()
+        else:
+            return self._build_items_collapsed()
+
+    def _build_items_expanded(self):
+        """Items para sidebar expandido."""
+        items = []
+
+        # Grupo Inventario (ExpansionTile)
+        inventario_tile = ft.ExpansionTile(
+            title=ft.Row(
+                [
+                    ft.Icon(AppIcons.INVENTARIO, color=ThemeManager.theme.text_secondary),
+                    ft.Text("Inventario", color=ThemeManager.theme.text_secondary),
+                ],
+                spacing=AppSpacing.SM,
+            ),
+            controls=[
+                self._crear_item_menu("Ingredientes", AppIcons.INGREDIENT, self._ir_ingredientes),
+                self._crear_item_menu("Productos", AppIcons.PRODUCT, self._ir_productos),
+                self._crear_item_menu("Recursos del Negocio", AppIcons.INVENTARIO, self._ir_recursos),
+            ],
+        )
+        items.append(inventario_tile)
+
+        # Items individuales
+        individual_items = [
             ("Mi Negocio", ft.icons.STORE_OUTLINED, self._ir_mi_negocio),
             ("Producción", AppIcons.FATORY, self._ir_produccion),
             ("Ventas", AppIcons.SALES, self._ir_ventas),
             ("Cuentas por Cobrar", ft.icons.ACCOUNT_BALANCE_WALLET_ROUNDED, self._ir_cuentas_por_cobrar),
             ("Estadísticas", ft.icons.BAR_CHART_ROUNDED, self._ir_estadisticas),
+            ("Reportes", ft.icons.ASSESSMENT_ROUNDED, self._ir_reportes),
             ("Cerrar Sesión", AppIcons.LOGOUT, self._logout),
         ]
+        for texto, icono, callback in individual_items:
+            items.append(self._crear_item_menu(texto, icono, callback))
 
-        items = [
-            self._crear_item_menu(texto, icono, callback)
-            for texto, icono, callback in self._sidebar_items
-        ]
+        return items
 
-        self.sidebar = ft.Container(
-            width=260,
-            bgcolor=ThemeManager.theme.sidebar,
-            padding=AppSpacing.SIDEBAR_PADDING,
-            content=ft.Column(
-                [
-                    ft.Text(
-                        "La Dulce Tía",
-                        size=20,
-                        weight="bold",
-                        color=ThemeManager.theme.primary,
+    def _build_items_collapsed(self):
+        """Items para sidebar colapsado (solo iconos con tooltips)."""
+        items = []
+
+        # Grupo Inventario: PopupMenuButton con tooltip
+        inventario_popup = ft.Tooltip(
+            message="Inventario",
+            wait_duration=3000,
+            content=ft.PopupMenuButton(
+                icon=AppIcons.INVENTARIO,
+                items=[
+                    ft.PopupMenuItem(
+                        content=ft.Row([
+                            ft.Icon(AppIcons.INGREDIENT, color=ThemeManager.theme.text_secondary),
+                            ft.Text("Ingredientes", color=ThemeManager.theme.text_secondary),
+                        ]),
+                        on_click=lambda e: self._ir_ingredientes(),
                     ),
-                    ft.Divider(),
-                    *items,
+                    ft.PopupMenuItem(
+                        content=ft.Row([
+                            ft.Icon(AppIcons.PRODUCT, color=ThemeManager.theme.text_secondary),
+                            ft.Text("Productos", color=ThemeManager.theme.text_secondary),
+                        ]),
+                        on_click=lambda e: self._ir_productos(),
+                    ),
+                    ft.PopupMenuItem(
+                        content=ft.Row([
+                            ft.Icon(AppIcons.INVENTARIO, color=ThemeManager.theme.text_secondary),
+                            ft.Text("Recursos del Negocio", color=ThemeManager.theme.text_secondary),
+                        ]),
+                        on_click=lambda e: self._ir_recursos(),
+                    ),
                 ],
-                spacing=AppSpacing.CONTROL_SPACING,
             ),
         )
+        items.append(inventario_popup)
+
+        # Items individuales
+        individual_items = [
+            ("Mi Negocio", ft.icons.STORE_OUTLINED, self._ir_mi_negocio),
+            ("Producción", AppIcons.FATORY, self._ir_produccion),
+            ("Ventas", AppIcons.SALES, self._ir_ventas),
+            ("Cuentas por Cobrar", ft.icons.ACCOUNT_BALANCE_WALLET_ROUNDED, self._ir_cuentas_por_cobrar),
+            ("Estadísticas", ft.icons.BAR_CHART_ROUNDED, self._ir_estadisticas),
+            ("Reportes", ft.icons.ASSESSMENT_ROUNDED, self._ir_reportes),
+            ("Cerrar Sesión", AppIcons.LOGOUT, self._logout),
+        ]
+        for texto, icono, callback in individual_items:
+            items.append(
+                ft.Tooltip(
+                    message=texto,
+                    wait_duration=3000,
+                    content=ft.Container(
+                        content=ft.IconButton(
+                            icon=icono,
+                            icon_color=ThemeManager.theme.text_secondary,
+                            on_click=callback,
+                        ),
+                        padding=10,
+                    ),
+                )
+            )
+
+        return items
 
     def _crear_item_menu(self, texto, icono, on_click):
+        """Crea un item de menú para modo expandido."""
         return ft.Container(
             content=ft.Row(
                 [
@@ -140,21 +271,19 @@ class DashboardModule:
             border_radius=8,
         )
 
+    def _toggle_sidebar(self, e=None) -> None:
+        """Alterna el estado expandido/colapsado del sidebar."""
+        self._sidebar_expanded = not self._sidebar_expanded
+        self._rebuild_sidebar()
+        self.page.update()  # Refresca toda la página para que el cambio sea visible
+
     # ============================================================
     # NAVEGACIÓN ENTRE MÓDULOS
     # ============================================================
-    #
-    # ✅ Ya no se llama a module.cargar() después de content_area.update().
-    # *_view() crea una instancia nueva del módulo, y su construir()
-    # YA hace la carga inicial de datos (población de la tabla en
-    # memoria) antes de devolver el layout. content_area.update() solo
-    # renderiza ese árbol ya poblado. Llamar a module.cargar() otra vez
-    # acá disparaba una segunda consulta idéntica al service/BD en CADA
-    # clic del sidebar -- trabajo duplicado sin ningún beneficio visual.
 
     def _ir_ingredientes(self, e=None):
         layout, module = ingredientes_view(self.page, self.content_area)
-        self._module_ingredientes = module  # ✅ antes no se actualizaba esta referencia
+        self._module_ingredientes = module
         self.content_area.content = layout
         self.content_area.update()
 
@@ -167,12 +296,11 @@ class DashboardModule:
         layout, module = productos_view(self.page, self.content_area)
         self.content_area.content = layout
         self.content_area.update()
-    
+
     def _ir_recursos(self, e=None):
         layout, module = activos_view(self.page, self.content_area)
         self.content_area.content = layout
         self.content_area.update()
-        # ✅ Cargar datos después de que la vista esté en la página
         if hasattr(module, 'cargar') and callable(module.cargar):
             module.cargar()
 
@@ -190,8 +318,7 @@ class DashboardModule:
             if hasattr(module, 'cargar') and callable(module.cargar):
                 module.cargar()
 
-            self.page.update()  # ✅ Forzar actualización de toda la página
-
+            self.page.update()
             print("MI NEGOCIO: cargado sin errores", flush=True)
         except Exception:
             print("MI NEGOCIO: ERROR", flush=True)
@@ -221,6 +348,13 @@ class DashboardModule:
         layout, module = estadisticas_view(self.page, self.content_area)
         self.content_area.content = layout
         self.content_area.update()
+
+    def _ir_reportes(self, e=None) -> None:
+        layout, module = reporte_view(self.page, self.content_area)
+        self.content_area.content = layout
+        self.content_area.update()
+        if hasattr(module, 'cargar') and callable(module.cargar):
+            module.cargar()
 
     def _logout(self, e=None) -> None:
         """Cierra sesión y vuelve al login."""

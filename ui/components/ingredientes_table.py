@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import flet as ft
 
+from ui.core.icons import AppIcons
+
 
 class IngredientesTable(ft.Container):
 
@@ -93,7 +95,7 @@ class IngredientesTable(ft.Container):
         for indice, ingrediente in enumerate(self.ingredientes):
 
             boton = ft.IconButton(
-                icon=ft.icons.DELETE_OUTLINE,
+                icon=AppIcons.DELETE_OUTLINE,
                 icon_color=ft.colors.RED,
                 tooltip="Eliminar ingrediente",
                 on_click=lambda e, i=indice: self._eliminar(i),

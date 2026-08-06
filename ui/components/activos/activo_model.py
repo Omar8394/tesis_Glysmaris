@@ -16,6 +16,7 @@ class Activo:
     proveedor: str = ""
     codigo_interno: str = ""
     observaciones: str = ""
+    modo_adquisicion: Optional[str] = None
     modalidad_costo: str = "por_unidad"
     unidad_costo: str = ""
     periodo: str = ""

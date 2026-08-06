@@ -54,19 +54,29 @@ class CuentaPorCobrarRepository(CRUDRepository):
     def actualizar(self, identificador: Any, datos: Dict[str, Any]) -> bool:
         # El monto solo se mueve a través de registrar_abono(); acá
         # solo se ajustan datos administrativos de la cuenta.
+        #
+        # Update PARCIAL de verdad: solo se tocan las columnas cuya
+        # clave viene presente en `datos`. Antes se pisaban ambas
+        # columnas siempre (con `.get(...)` -> None si faltaba la
+        # clave), lo que podía borrar sin querer un dato existente
+        # si el llamador no pensaba enviar esa clave.
+        campos = []
+        valores: Dict[str, Any] = {"id_cuenta": identificador}
+
+        if "fecha_vencimiento" in datos:
+            campos.append("fecha_vencimiento = %(fecha_vencimiento)s")
+            valores["fecha_vencimiento"] = datos.get("fecha_vencimiento")
+        if "observaciones" in datos:
+            campos.append("observaciones = %(observaciones)s")
+            valores["observaciones"] = datos.get("observaciones")
+
+        if not campos:
+            return False
+
         cursor = self._cursor()
         cursor.execute(
-            """
-            UPDATE CUENTAS_POR_COBRAR
-            SET fecha_vencimiento = %(fecha_vencimiento)s,
-                observaciones = %(observaciones)s
-            WHERE id_cuenta = %(id_cuenta)s
-            """,
-            {
-                "id_cuenta": identificador,
-                "fecha_vencimiento": datos.get("fecha_vencimiento"),
-                "observaciones": datos.get("observaciones"),
-            },
+            f"UPDATE CUENTAS_POR_COBRAR SET {', '.join(campos)} WHERE id_cuenta = %(id_cuenta)s",
+            valores,
         )
         self._commit()
         return cursor.rowcount > 0
@@ -102,15 +112,23 @@ class CuentaPorCobrarRepository(CRUDRepository):
         )
         return cursor.fetchall()
 
-    def buscar(self, texto: str) -> List[Dict]:
+    def buscar(self, texto: str, solo_pendientes: bool = False) -> List[Dict]:
+        """
+        `solo_pendientes=True` restringe la búsqueda a estado en
+        ('pendiente', 'parcial'), para que el buscador respete el
+        filtro "Solo pendientes" de la pantalla en vez de traer
+        siempre todo (incluidas cuentas pagadas/anuladas).
+        """
         cursor = self._cursor()
         patron = f"%{texto}%"
+        condicion_estado = "AND cc.estado IN ('pendiente', 'parcial')" if solo_pendientes else ""
         cursor.execute(
-            """
+            f"""
             SELECT cc.*, cl.nombre AS cliente_nombre, cl.telefono AS cliente_telefono
             FROM CUENTAS_POR_COBRAR cc
             LEFT JOIN CLIENTES cl ON cl.id_cliente = cc.id_cliente
-            WHERE cl.nombre LIKE %s OR cl.cedula LIKE %s
+            WHERE (cl.nombre LIKE %s OR cl.cedula LIKE %s)
+            {condicion_estado}
             ORDER BY cc.fecha_venta DESC
             """,
             (patron, patron),
@@ -173,15 +191,22 @@ class CuentaPorCobrarRepository(CRUDRepository):
                  observaciones, usuario_registro),
             )
 
+            # IMPORTANTE: en MySQL las asignaciones de un UPDATE de una
+            # sola tabla se evalúan de izquierda a derecha, y una columna
+            # ya reasignada en el mismo UPDATE se lee con su valor NUEVO
+            # (no el original). Por eso el CASE de `estado` va ANTES de
+            # reasignar `monto_pendiente`: si fuera después, restaría el
+            # abono dos veces y marcaría 'pagada' cuentas que todavía
+            # tienen saldo pendiente.
             cursor.execute(
                 """
                 UPDATE CUENTAS_POR_COBRAR
                 SET monto_abonado = monto_abonado + %s,
-                    monto_pendiente = monto_pendiente - %s,
                     estado = CASE
                         WHEN monto_pendiente - %s <= 0 THEN 'pagada'
                         ELSE 'parcial'
-                    END
+                    END,
+                    monto_pendiente = monto_pendiente - %s
                 WHERE id_cuenta = %s
                 """,
                 (monto, monto, monto, id_cuenta),

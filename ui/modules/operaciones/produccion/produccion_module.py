@@ -47,6 +47,7 @@ class ProduccionModule(Module):
         # Estado
         self._filtro_estado = ""
         self._filtro_busqueda = ""
+        self._filtro_incluir_agotadas = False
         self._ordenes = []
 
         # Barra de herramientas
@@ -64,6 +65,15 @@ class ProduccionModule(Module):
             width=160,
             on_change=lambda e: self._aplicar_filtros(),
         )
+        # Las órdenes finalizadas 100% vendidas se ocultan del tablero por
+        # defecto (ver ProduccionRepository.listar_ordenes); este check
+        # permite volver a mostrarlas puntualmente sin tener que ir a la
+        # base de datos.
+        self.check_incluir_agotadas = ft.Checkbox(
+            label="Mostrar agotadas",
+            value=False,
+            on_change=lambda e: self._aplicar_filtros(),
+        )
         self.btn_nuevo = BotonPrimario(
             texto="Nueva Orden",
             icono=AppIcons.ADD,
@@ -71,7 +81,7 @@ class ProduccionModule(Module):
         )
 
         self.toolbar = Toolbar(
-            izquierda=[self.buscador, self.filtro_estado],
+            izquierda=[self.buscador, self.filtro_estado, self.check_incluir_agotadas],
             derecha=[self.btn_nuevo],
         )
 
@@ -114,6 +124,8 @@ class ProduccionModule(Module):
             filtros["estado"] = self._filtro_estado
         if self._filtro_busqueda:
             filtros["buscar"] = self._filtro_busqueda
+        if self._filtro_incluir_agotadas:
+            filtros["incluir_agotadas"] = True
 
         self._ordenes = self.servicio.listar(filtros)
         self._actualizar_panel()
@@ -137,6 +149,7 @@ class ProduccionModule(Module):
     def _aplicar_filtros(self):
         self._filtro_busqueda = self.buscador.obtener() or ""
         self._filtro_estado = self.filtro_estado.value or ""
+        self._filtro_incluir_agotadas = self.check_incluir_agotadas.value or False
         self.cargar()
 
     def _buscar(self, texto):
@@ -180,10 +193,24 @@ class ProduccionModule(Module):
         # La merma registrada para un detalle se resta de lo planificado
         # para obtener la cantidad realmente lograda; si no se le asoció
         # producto (merma general), no afecta el rendimiento de ninguno.
+        #
+        # ❌ Bug anterior: esto restaba la cantidad de la merma tal cual
+        # de cantidad_planificada sin mirar la unidad. cantidad_planificada
+        # siempre está en "unidades de producto" (ej. 3 tortas), pero la
+        # merma puede haberse cargado en peso/volumen (g, ml, kg, l) --
+        # ej. "150 g" de recorte de una torta. Restar 150 de 3 directo
+        # tiraba cantidad_obtenida a 0 (por el max(0, ...)) aunque en
+        # realidad casi toda la producción se haya logrado bien.
+        # Ahora solo se descuentan mermas cargadas por conteo (unidad
+        # completa descartada); las mermas en peso/volumen no representan
+        # una unidad de producto perdida, así que no tocan este cálculo
+        # (su costo ya se contempla aparte vía costo_asociado).
+        UNIDADES_CONTEO_MERMA = {"unidad", "unidades", "u"}
         merma_por_detalle: dict = {}
         for m in mermas:
             id_detalle = m.get("id_detalle")
-            if id_detalle is not None:
+            unidad_merma = (m.get("unidad") or "unidad").strip().lower()
+            if id_detalle is not None and unidad_merma in UNIDADES_CONTEO_MERMA:
                 merma_por_detalle[id_detalle] = merma_por_detalle.get(id_detalle, 0) + float(m.get("cantidad", 0))
 
         datos_fin = {"detalles": {}, "mermas": mermas}

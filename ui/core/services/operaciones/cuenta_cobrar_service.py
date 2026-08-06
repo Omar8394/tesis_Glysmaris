@@ -22,6 +22,12 @@ from ui.core.services.base.crud_service import CRUDService
 from ui.core.repositories.operaciones.cuenta_cobrar_repository import CuentaPorCobrarRepository
 
 
+# Debe coincidir con el ENUM de metodo_pago en ABONOS_CUENTA (schema.py).
+# No incluye "credito": no tiene sentido abonar una deuda a crédito con
+# más crédito.
+METODOS_ABONO_VALIDOS = {"efectivo", "debito", "transferencia", "pago_movil"}
+
+
 class CuentaPorCobrarService(CRUDService):
     """
     Servicio de cuentas por cobrar (deudas de ventas a crédito).
@@ -63,9 +69,24 @@ class CuentaPorCobrarService(CRUDService):
         return True, "Cuenta por cobrar actualizada."
 
     def eliminar(self, identificador: Any) -> tuple[bool, str]:
+        cuenta = self._repositorio.obtener(identificador)
+        if cuenta is None:
+            return False, "No se encontró la cuenta por cobrar."
+
+        if cuenta["estado"] == "anulada":
+            return False, "Esta cuenta ya está anulada."
+
+        ya_estaba_pagada = cuenta["estado"] == "pagada"
+
         anulado = self._repositorio.eliminar(identificador)
         if not anulado:
             return False, "No se encontró la cuenta por cobrar."
+
+        if ya_estaba_pagada:
+            return True, (
+                "Cuenta por cobrar anulada. Ojo: esta cuenta ya estaba "
+                "marcada como pagada, verificá que sea intencional."
+            )
         return True, "Cuenta por cobrar anulada."
 
     def obtener(self, identificador: Any) -> Optional[Dict]:
@@ -74,8 +95,8 @@ class CuentaPorCobrarService(CRUDService):
     def listar(self) -> List[Dict]:
         return self._repositorio.listar()
 
-    def buscar(self, texto: str) -> List[Dict]:
-        return self._repositorio.buscar(texto)
+    def buscar(self, texto: str, solo_pendientes: bool = False) -> List[Dict]:
+        return self._repositorio.buscar(texto, solo_pendientes=solo_pendientes)
 
     def listar_deudas_pendientes(self) -> List[Dict]:
         """
@@ -112,10 +133,17 @@ class CuentaPorCobrarService(CRUDService):
         if monto <= 0:
             return False, "El monto del abono debe ser mayor a cero."
 
-        if monto > float(cuenta["monto_pendiente"]):
+        if metodo_pago not in METODOS_ABONO_VALIDOS:
+            return False, "Método de pago inválido para un abono."
+
+        pendiente = float(cuenta["monto_pendiente"])
+        # Tolerancia de medio centavo para evitar falsos rechazos por
+        # error de redondeo binario al comparar floats (ej. un abono
+        # que debería cerrar la cuenta exacto en 0).
+        if monto > pendiente + 0.005:
             return False, (
                 f"El abono (${monto:.2f}) supera el saldo pendiente "
-                f"(${float(cuenta['monto_pendiente']):.2f})."
+                f"(${pendiente:.2f})."
             )
 
         self._repositorio.registrar_abono(

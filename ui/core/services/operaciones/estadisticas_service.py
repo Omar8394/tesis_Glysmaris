@@ -97,15 +97,25 @@ class EstadisticasService:
         baja_demanda: List[Dict[str, Any]] = []
 
         for registro in registros:
-            meses_con_ventas = registro.get("meses_con_ventas") or 1
+            meses_previos = registro.get("meses_previos_con_ventas") or 0
 
-            # Con un solo mes de historial (el mes actual) no hay una
-            # base real contra la cual comparar; esperamos al menos
-            # 2 meses de datos para clasificar el producto.
-            if meses_con_ventas < 2:
+            # Sin al menos un mes previo de historial no hay una base
+            # real contra la cual comparar el mes actual; esperamos
+            # al menos 1 mes previo con ventas para poder clasificar
+            # el producto.
+            if meses_previos < 1:
                 continue
 
-            promedio_mensual = registro["ventas_totales_anio"] / meses_con_ventas
+            # IMPORTANTE: el promedio se calcula únicamente con
+            # meses previos al actual (ventas_meses_previos /
+            # meses_previos_con_ventas). El mes actual NUNCA debe
+            # entrar en su propio promedio de comparación, porque
+            # eso sesga el índice hacia 1.0 y amortigua cualquier
+            # desviación real (un pico de demanda parecería menor
+            # de lo que es, y una caída también).
+            promedio_mensual = (
+                registro["ventas_meses_previos"] / meses_previos
+            )
 
             if promedio_mensual <= 0:
                 continue
@@ -117,7 +127,7 @@ class EstadisticasService:
                     {
                         "nombre": registro["nombre_producto"],
                         "razon": (
-                            f"Ventas {int((indice - 1) * 100)}% superiores "
+                            f"Ventas {round((indice - 1) * 100)}% superiores "
                             "al promedio habitual este mes."
                         ),
                     }
@@ -127,7 +137,7 @@ class EstadisticasService:
                     {
                         "nombre": registro["nombre_producto"],
                         "razon": (
-                            f"Caída del {int((1 - indice) * 100)}% en "
+                            f"Caída del {round((1 - indice) * 100)}% en "
                             "demanda respecto al año."
                         ),
                     }

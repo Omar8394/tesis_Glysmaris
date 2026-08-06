@@ -81,6 +81,14 @@ class RecetasRepository(CRUDRepository):
             "UPDATE PRODUCTOS SET receta_id = NULL WHERE receta_id = %s",
             (identificador,),
         )
+        # Borrar ingredientes de la receta explícitamente: no asumimos
+        # que la FK tenga ON DELETE CASCADE configurado. Sin esto, si no
+        # lo tiene, quedan filas huérfanas en RECETA_INGREDIENTES
+        # apuntando a un id_receta que ya no existe.
+        cursor.execute(
+            "DELETE FROM RECETA_INGREDIENTES WHERE id_receta = %s",
+            (identificador,),
+        )
         cursor.execute("DELETE FROM RECETAS WHERE id_receta = %s", (identificador,))
         self._commit()
         return cursor.rowcount > 0

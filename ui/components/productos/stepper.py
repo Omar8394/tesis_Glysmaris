@@ -122,6 +122,14 @@ class Stepper(ft.Row):
 
                 color=self.tema.primary if activo else self.tema.text_secondary,
 
+                text_align=ft.TextAlign.CENTER,
+
+                max_lines=1,
+
+                overflow=ft.TextOverflow.ELLIPSIS,
+
+                width=72,
+
             )
 
             controles.append(

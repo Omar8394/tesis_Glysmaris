@@ -36,6 +36,7 @@ from ui.components.selector import Selector
 from ui.components.autocompletado import AutoCompletado
 from ui.components.boton import BotonPrimario, BotonSecundario
 from ui.components.tarjetas import TarjetaFormulario
+from ui.components.mensajes import MensajeSistema
 from ui.components.productos.stepper import Stepper
 from ui.components.productos.tabla_seleccion import TablaSeleccion
 from ui.core.spacing import AppSpacing
@@ -154,12 +155,24 @@ class ProductoWizard(ft.Container):
 
     def _renderizar_stepper(self):
         if self.tipo is None:
+            self._stepper_instancia = None
             self.contenedor_stepper.content = ft.Container()
+            return
+
+        # ✅ Antes se creaba un Stepper nuevo en cada cambio de paso.
+        # Ahora se reusa la misma instancia (vía ir_a) mientras el tipo
+        # de producto no cambie -- Stepper.ir_a() ya existía pero no se
+        # llamaba desde ningún lado.
+        pasos_actuales = self._pasos_para_tipo()
+        stepper_existente = getattr(self, "_stepper_instancia", None)
+        if stepper_existente is not None and stepper_existente.pasos == pasos_actuales:
+            stepper_existente.ir_a(self.paso_actual)
         else:
-            self.contenedor_stepper.content = Stepper(
-                pasos=self._pasos_para_tipo(),
+            self._stepper_instancia = Stepper(
+                pasos=pasos_actuales,
                 paso_actual=self.paso_actual,
             )
+            self.contenedor_stepper.content = self._stepper_instancia
 
     def _renderizar_botones(self):
         if self.tipo is None:
@@ -171,10 +184,16 @@ class ProductoWizard(ft.Container):
                 ),
             ]
         else:
+            # ✅ "Cambiar tipo" es más largo que "Atrás"; el fix de fondo
+            # (que BotonSecundario/BotonPrimario no desborden con
+            # textos largos) va en boton.py, pero mientras tanto le
+            # pasamos un ancho explícito más generoso a este botón en
+            # particular para que el texto entre completo.
             botones = [
                 BotonSecundario(
                     texto="Atrás" if self.paso_actual > 0 else "Cambiar tipo",
                     icono=AppIcons.BACK,
+                    width=None if self.paso_actual > 0 else 170,
                     on_click=lambda e: self._atras(),
                 ),
             ]
@@ -275,6 +294,7 @@ class ProductoWizard(ft.Container):
 
     def _validar_paso_actual(self) -> bool:
         nombre_paso = self._pasos_para_tipo()[self.paso_actual]
+
         if nombre_paso == "Información":
             if not self.txt_nombre.value or not self.txt_nombre.value.strip():
                 self.txt_nombre.error_text = "El nombre es obligatorio."
@@ -282,7 +302,40 @@ class ProductoWizard(ft.Container):
                 return False
             self.txt_nombre.error_text = None
             self.txt_nombre.update()
+
+        elif nombre_paso == "Presentaciones" and self.tipo == "individual":
+            # ✅ Antes solo el service (al guardar) exigía al menos una
+            # presentación en productos individuales que no son torta;
+            # ahora se bloquea acá para no dejar avanzar todo el wizard
+            # y enterarse recién en "Guardar".
+            if self._es_torta:
+                if not self.txt_diametro.value or not self.txt_diametro.value.strip():
+                    self._mostrar_error_paso("El diámetro es obligatorio para una torta.")
+                    return False
+            elif not self.presentaciones:
+                self._mostrar_error_paso("Agregá al menos una presentación antes de continuar.")
+                return False
+
+        elif nombre_paso == "Componentes" and self.tipo == "elaborado":
+            if not self.componentes:
+                self._mostrar_error_paso("Agregá al menos un componente antes de continuar.")
+                return False
+
+        elif nombre_paso == "Productos" and self.tipo == "combo":
+            if not self.productos_combo:
+                self._mostrar_error_paso("Agregá al menos un producto al combo antes de continuar.")
+                return False
+
+        elif nombre_paso == "Precio" and self.tipo == "combo":
+            if not self.txt_precio_combo.value or not self.txt_precio_combo.value.strip():
+                self._mostrar_error_paso("El precio del combo es obligatorio.")
+                return False
+
         return True
+
+    def _mostrar_error_paso(self, mensaje: str):
+        """Muestra un aviso breve de validación (mismo mecanismo que usa el resto del sistema)."""
+        MensajeSistema.error(self._pagina, mensaje)
 
     # Nuevo método:
     def _actualizar_es_torta(self, e=None):
@@ -358,7 +411,10 @@ class ProductoWizard(ft.Container):
 
     def _paso_presentaciones(self):
         datos = self.datos_iniciales
-        self._es_torta = (self.dd_categoria.value or "") == "Tortas"
+        # ✅ Antes esta línea repetía la misma lógica que
+        # _actualizar_es_torta(); ahora ese método es la única fuente
+        # de verdad para el criterio "¿es torta?".
+        self._actualizar_es_torta()
 
         controles: list = []
 
@@ -412,6 +468,7 @@ class ProductoWizard(ft.Container):
             )
             self.tabla_empaques_presentacion = TablaSeleccion(
                 columnas=[("nombre", "Empaque"), ("cantidad", "Cantidad")],
+                on_eliminar=self._quitar_empaque_presentacion,
             )
             self.tabla_empaques_presentacion.reemplazar(self._empaques_presentacion_actual)
 
@@ -482,6 +539,7 @@ class ProductoWizard(ft.Container):
             )
             self.tabla_empaques_presentacion = TablaSeleccion(
                 columnas=[("nombre", "Empaque"), ("cantidad", "Cantidad")],
+                on_eliminar=self._quitar_empaque_presentacion,
             )
             self.tabla_empaques_presentacion.reemplazar(self._empaques_presentacion_actual)
 
@@ -506,6 +564,7 @@ class ProductoWizard(ft.Container):
                     ("empaque", "Empaque"),
                     ("precio", "Precio"),
                 ],
+                on_eliminar=self._quitar_presentacion,
             )
             self.tabla_presentaciones.reemplazar(self._filas_presentaciones())
             boton_agregar = ft.IconButton(
@@ -620,6 +679,15 @@ class ProductoWizard(ft.Container):
         self.txt_presentacion_empaque_cantidad.update()
         self._actualizar_precio_sugerido()
 
+    def _quitar_empaque_presentacion(self, indice):
+        """Callback de TablaSeleccion: quita un empaque de la lista real
+        de la presentación actual (torta o genérica) y re-renderiza."""
+        if 0 <= indice < len(self._empaques_presentacion_actual):
+            self._empaques_presentacion_actual.pop(indice)
+            self.tabla_empaques_presentacion.reemplazar(self._empaques_presentacion_actual)
+            self._actualizar_precio_sugerido()
+            self._actualizar_precio_sugerido_original()
+
     # ─── Lógica de presentaciones para no-torta ───
 
     def _filas_presentaciones(self) -> list[dict]:
@@ -677,6 +745,13 @@ class ProductoWizard(ft.Container):
         self._empaques_presentacion_actual.clear()
         self.tabla_empaques_presentacion.reemplazar([])
         self._actualizar_precio_sugerido_original()
+
+    def _quitar_presentacion(self, indice):
+        """Callback de TablaSeleccion: quita una presentación de la
+        lista real self.presentaciones y re-renderiza la tabla."""
+        if 0 <= indice < len(self.presentaciones):
+            self.presentaciones.pop(indice)
+            self.tabla_presentaciones.reemplazar(self._filas_presentaciones())
 
     # ─── Cálculo de precio sugerido ───
 
@@ -770,6 +845,7 @@ class ProductoWizard(ft.Container):
         )
         self.tabla_componentes = TablaSeleccion(
             columnas=[("tipo", "Tipo"), ("nombre", "Nombre"), ("cantidad", "Cantidad"), ("unidad", "Unidad")],
+            on_eliminar=self._quitar_componente,
         )
         self.tabla_componentes.reemplazar(self.componentes)
         boton_agregar = ft.IconButton(
@@ -822,6 +898,13 @@ class ProductoWizard(ft.Container):
         self.txt_componente_cantidad.value = ""
         self.txt_componente_cantidad.update()
 
+    def _quitar_componente(self, indice):
+        """Callback de TablaSeleccion: quita un componente de la lista
+        real self.componentes y re-renderiza la tabla."""
+        if 0 <= indice < len(self.componentes):
+            self.componentes.pop(indice)
+            self.tabla_componentes.reemplazar(self.componentes)
+
     # =====================================================
     # PASO: EMPAQUES (Elaborado)
     # =====================================================
@@ -840,6 +923,7 @@ class ProductoWizard(ft.Container):
         )
         self.tabla_empaques = TablaSeleccion(
             columnas=[("nombre", "Empaque"), ("cantidad", "Cantidad")],
+            on_eliminar=self._quitar_empaque,
         )
         self.tabla_empaques.reemplazar(self.empaques)
         boton_agregar = ft.IconButton(
@@ -874,6 +958,13 @@ class ProductoWizard(ft.Container):
         self.autocompletado_empaque.limpiar()
         self.txt_empaque_cantidad.value = "1"
         self.txt_empaque_cantidad.update()
+
+    def _quitar_empaque(self, indice):
+        """Callback de TablaSeleccion: quita un empaque de la lista
+        real self.empaques y re-renderiza la tabla."""
+        if 0 <= indice < len(self.empaques):
+            self.empaques.pop(indice)
+            self.tabla_empaques.reemplazar(self.empaques)
 
     # =====================================================
     # PASO: COSTOS (Individual y Elaborado)
@@ -1051,6 +1142,7 @@ class ProductoWizard(ft.Container):
         )
         self.tabla_productos_combo = TablaSeleccion(
             columnas=[("nombre", "Producto"), ("cantidad", "Cantidad")],
+            on_eliminar=self._quitar_producto_combo,
         )
         self.tabla_productos_combo.reemplazar(self.productos_combo)
         boton_agregar = ft.IconButton(
@@ -1084,6 +1176,13 @@ class ProductoWizard(ft.Container):
         self.autocompletado_producto_combo.limpiar()
         self.txt_producto_combo_cantidad.value = "1"
         self.txt_producto_combo_cantidad.update()
+
+    def _quitar_producto_combo(self, indice):
+        """Callback de TablaSeleccion: quita un producto de la lista
+        real self.productos_combo y re-renderiza la tabla."""
+        if 0 <= indice < len(self.productos_combo):
+            self.productos_combo.pop(indice)
+            self.tabla_productos_combo.reemplazar(self.productos_combo)
 
     # =====================================================
     # PASO: PRECIO DEL COMBO
@@ -1134,7 +1233,7 @@ class ProductoWizard(ft.Container):
                     try:
                         cant = float(self.txt_cantidad_trozos.value or 1)
                         precio_trozo_sugerido = precio_completo_sugerido / cant if cant else 0
-                    except:
+                    except (ValueError, ZeroDivisionError):
                         precio_trozo_sugerido = 0
                 else:
                     precio_trozo_sugerido = None
@@ -1144,7 +1243,7 @@ class ProductoWizard(ft.Container):
                 if precio_manual:
                     try:
                         precio_final = float(precio_manual)
-                    except:
+                    except ValueError:
                         precio_final = precio_completo_sugerido
                 else:
                     precio_final = precio_completo_sugerido

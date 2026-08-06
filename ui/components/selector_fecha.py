@@ -113,7 +113,15 @@ class SelectorFecha(ft.Row):
 
         )
 
-        self.page.overlay.append(self.date_picker)
+        # ✅ BUG: antes se hacía `page.overlay.append(self.date_picker)`
+        # aquí y luego, en _abrir_calendario, `self.date_picker.open = True`
+        # + `self.page.update()`. Ese es el patrón de Flet clásico para
+        # mostrar diálogos. En versiones recientes de Flet ese patrón fue
+        # reemplazado por `Page.show_dialog(control)`, y el viejo ya no
+        # muestra nada -- ni error, ni calendario, nada (el botón solo
+        # cambia de color al pasar el mouse porque eso es CSS de hover,
+        # no efecto del clic). Ahora _abrir_calendario decide en tiempo de
+        # ejecución cuál mecanismo usar según lo que soporte la Page.
 
         self.controls = [
 
@@ -128,9 +136,15 @@ class SelectorFecha(ft.Row):
     
     def _abrir_calendario(self, e):
 
-        self.date_picker.open = True
-
-        self.page.update()
+        if hasattr(self.page, "show_dialog"):
+            # Flet reciente: los diálogos (DatePicker incluido) se abren así.
+            self.page.show_dialog(self.date_picker)
+        else:
+            # Flet clásico (aprox. <= 0.21): overlay + open=True.
+            if self.date_picker not in self.page.overlay:
+                self.page.overlay.append(self.date_picker)
+            self.date_picker.open = True
+            self.page.update()
     
     #==============================
     # MOMENTO DE SELECCION
@@ -167,9 +181,20 @@ class SelectorFecha(ft.Row):
 
         self.campo.value = self._valor.strftime(self.formato) if self._valor else ""
 
+        # ✅ Antes esto no refrescaba el control visualmente si ya estaba
+        # montado en pantalla: el valor interno cambiaba pero el texto del
+        # campo se quedaba con la fecha anterior hasta el próximo render
+        # completo de la página (mismo problema que tenía Selector con
+        # establecer_opciones()).
+        if self.campo.page:
+            self.campo.update()
+
 
     def limpiar(self):
 
         self._valor = None
 
         self.campo.value = ""
+
+        if self.campo.page:
+            self.campo.update()

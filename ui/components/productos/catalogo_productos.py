@@ -74,6 +74,10 @@ class CatalogoProductos(ft.Container):
 
         self.seleccionados: set = set()
 
+        # ✅ La columna sigue siendo la que scrollea verticalmente.
+        # Cada categoría ahora arma un GridView de altura fija
+        # (calculada según la cantidad de tarjetas), en vez de un
+        # Row(wrap=True) sin ancho definido -- ver _fila_tarjetas().
         self.columna = ft.Column(
 
             spacing=AppSpacing.SECTION_SPACING,
@@ -171,9 +175,33 @@ class CatalogoProductos(ft.Container):
 
     def _fila_tarjetas(self, productos):
 
-        return ft.Row(
+        # ✅ Antes esto era un ft.Row(wrap=True, ...) colgando de una
+        # cadena de contenedores expand=True sin ningún ancho rígido
+        # en el medio -- en Flet eso hace que el Row nunca reciba una
+        # restricción de ancho real y, en vez de bajar de línea, siga
+        # agregando tarjetas hacia la derecha (el "scroll que se aleja").
+        # GridView calcula el wrapping por su cuenta a partir de
+        # max_extent, sin depender del ancho que le pase el padre.
+        #
+        # Este GridView vive dentro de self.columna (que ya tiene su
+        # propio scroll vertical), así que le damos una altura fija
+        # -estimada según el ancho disponible de la página- en vez de
+        # expand=True: un GridView con altura infinita anidado en un
+        # Column con scroll no tiene cómo calcular su propio layout.
+        ancho_celda = TarjetaProducto.ANCHO + AppSpacing.MD
+        alto_celda = TarjetaProducto.ALTO + AppSpacing.MD
 
-            wrap=True,
+        ancho_disponible = (self.page.width if self.page else None) or 1200
+        columnas_por_fila = max(1, int(ancho_disponible // ancho_celda))
+        filas = max(1, -(-len(productos) // columnas_por_fila)) if productos else 1
+
+        return ft.GridView(
+
+            height=filas * alto_celda,
+
+            max_extent=TarjetaProducto.ANCHO + AppSpacing.MD,
+
+            child_aspect_ratio=TarjetaProducto.ANCHO / TarjetaProducto.ALTO,
 
             spacing=AppSpacing.MD,
 
