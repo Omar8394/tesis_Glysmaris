@@ -36,6 +36,7 @@ from ui.modules.operaciones.ventas.ventas import ventas_view
 from ui.modules.operaciones.estadisticas.estadisticas import estadisticas_view
 from ui.modules.operaciones.cuentas_por_cobrar.cuentas_por_cobrar import cuentas_por_cobrar_view
 from ui.modules.operaciones.reportes.reporte import reporte_view  # nuevo
+from ui.modules.seguridad.usuario import usuarios_view  # nuevo
 
 class DashboardModule:
 
@@ -183,6 +184,7 @@ class DashboardModule:
             ("Cuentas por Cobrar", ft.icons.ACCOUNT_BALANCE_WALLET_ROUNDED, self._ir_cuentas_por_cobrar),
             ("Estadísticas", ft.icons.BAR_CHART_ROUNDED, self._ir_estadisticas),
             ("Reportes", ft.icons.ASSESSMENT_ROUNDED, self._ir_reportes),
+            ("Usuarios", ft.icons.PEOPLE_ROUNDED, self._ir_usuarios),
             ("Cerrar Sesión", AppIcons.LOGOUT, self._logout),
         ]
         for texto, icono, callback in individual_items:
@@ -235,6 +237,7 @@ class DashboardModule:
             ("Cuentas por Cobrar", ft.icons.ACCOUNT_BALANCE_WALLET_ROUNDED, self._ir_cuentas_por_cobrar),
             ("Estadísticas", ft.icons.BAR_CHART_ROUNDED, self._ir_estadisticas),
             ("Reportes", ft.icons.ASSESSMENT_ROUNDED, self._ir_reportes),
+            ("Usuarios", ft.icons.PEOPLE_ROUNDED, self._ir_usuarios),
             ("Cerrar Sesión", AppIcons.LOGOUT, self._logout),
         ]
         for texto, icono, callback in individual_items:
@@ -351,6 +354,13 @@ class DashboardModule:
 
     def _ir_reportes(self, e=None) -> None:
         layout, module = reporte_view(self.page, self.content_area)
+        self.content_area.content = layout
+        self.content_area.update()
+        if hasattr(module, 'cargar') and callable(module.cargar):
+            module.cargar()
+
+    def _ir_usuarios(self, e=None) -> None:
+        layout, module = usuarios_view(self.page, self.content_area)
         self.content_area.content = layout
         self.content_area.update()
         if hasattr(module, 'cargar') and callable(module.cargar):
