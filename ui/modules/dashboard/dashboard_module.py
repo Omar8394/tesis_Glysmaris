@@ -36,7 +36,8 @@ from ui.modules.operaciones.ventas.ventas import ventas_view
 from ui.modules.operaciones.estadisticas.estadisticas import estadisticas_view
 from ui.modules.operaciones.cuentas_por_cobrar.cuentas_por_cobrar import cuentas_por_cobrar_view
 from ui.modules.operaciones.reportes.reporte import reporte_view  # nuevo
-from ui.modules.seguridad.usuario import usuarios_view  # nuevo
+from ui.modules.seguridad.usuario import usuarios_view 
+from ui.modules.inicio_view import inicio_view
 
 class DashboardModule:
 
@@ -67,9 +68,12 @@ class DashboardModule:
             self._module_ingredientes.cargar()
 
     def _cargar_modulo_inicial(self) -> None:
-        layout, module = ingredientes_view(self.page, self.content_area)
-        self._module_ingredientes = module
+        layout, module = inicio_view(self.page, self.content_area,
+                                    usuario_actual=self.usuario_actual,
+                                    dashboard_module=self)
         self.content_area.content = layout
+
+    
 
     # ============================================================
     # SIDEBAR
@@ -172,12 +176,14 @@ class DashboardModule:
                 self._crear_item_menu("Ingredientes", AppIcons.INGREDIENT, self._ir_ingredientes),
                 self._crear_item_menu("Productos", AppIcons.PRODUCT, self._ir_productos),
                 self._crear_item_menu("Recursos del Negocio", AppIcons.INVENTARIO, self._ir_recursos),
+                self._crear_item_menu("Recetas", AppIcons.RECIPE, self._ir_recetas),
             ],
         )
         items.append(inventario_tile)
 
         # Items individuales
         individual_items = [
+            ("Inicio", ft.icons.HOME_OUTLINED, self._ir_inicio),
             ("Mi Negocio", ft.icons.STORE_OUTLINED, self._ir_mi_negocio),
             ("Producción", AppIcons.FATORY, self._ir_produccion),
             ("Ventas", AppIcons.SALES, self._ir_ventas),
@@ -224,6 +230,12 @@ class DashboardModule:
                         ]),
                         on_click=lambda e: self._ir_recursos(),
                     ),
+
+                    ft.PopupMenuItem(
+                        content=ft.Row([ft.Icon(AppIcons.RECIPE, color=ThemeManager.theme.text_secondary),
+                                        ft.Text("Recetas", color=ThemeManager.theme.text_secondary)]),
+                        on_click=lambda e: self._ir_recetas(),
+                    ),
                 ],
             ),
         )
@@ -231,6 +243,7 @@ class DashboardModule:
 
         # Items individuales
         individual_items = [
+            ("Inicio", ft.icons.HOME_OUTLINED, self._ir_inicio),
             ("Mi Negocio", ft.icons.STORE_OUTLINED, self._ir_mi_negocio),
             ("Producción", AppIcons.FATORY, self._ir_produccion),
             ("Ventas", AppIcons.SALES, self._ir_ventas),
@@ -283,6 +296,13 @@ class DashboardModule:
     # ============================================================
     # NAVEGACIÓN ENTRE MÓDULOS
     # ============================================================
+
+    def _ir_inicio(self, e=None):
+        layout, module = inicio_view(self.page, self.content_area,
+                                    usuario_actual=self.usuario_actual,
+                                    dashboard_module=self)
+        self.content_area.content = layout
+        self.content_area.update()
 
     def _ir_ingredientes(self, e=None):
         layout, module = ingredientes_view(self.page, self.content_area)

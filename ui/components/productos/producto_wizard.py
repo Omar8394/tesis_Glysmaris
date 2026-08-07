@@ -303,6 +303,13 @@ class ProductoWizard(ft.Container):
             self.txt_nombre.error_text = None
             self.txt_nombre.update()
 
+            if self.tipo == "individual":
+                if not self.autocompletado_receta.obtener():
+                    self._mostrar_error_paso("Debés seleccionar una receta.")
+                    return False
+                if not self._obtener_id_seleccionado(self.autocompletado_receta, "la receta"):
+                    return False
+
         elif nombre_paso == "Presentaciones" and self.tipo == "individual":
             # ✅ Antes solo el service (al guardar) exigía al menos una
             # presentación en productos individuales que no son torta;
@@ -336,6 +343,35 @@ class ProductoWizard(ft.Container):
     def _mostrar_error_paso(self, mensaje: str):
         """Muestra un aviso breve de validación (mismo mecanismo que usa el resto del sistema)."""
         MensajeSistema.error(self._pagina, mensaje)
+
+    def _obtener_id_seleccionado(self, autocompletado, entidad: str):
+        """
+        Devuelve el id de lo que el usuario eligió en `autocompletado`
+        (una receta, ingrediente, producto, empaque, etc.), o None si
+        hay texto en el campo pero no corresponde a ninguna selección
+        real de la lista de sugerencias.
+
+        ⚠️ AutoCompletado._seleccionado (y por lo tanto obtener_id())
+        solo se fija cuando el usuario hace clic en un ítem de la
+        lista de sugerencias. Si escribe el nombre exacto y sigue de
+        largo (Tab, clic en otro campo) sin clickear la sugerencia, el
+        campo se ve perfecto pero obtener_id() devuelve None -- y
+        quien llame a esto (_agregar_componente, _agregar_empaque,
+        _agregar_producto_combo, _agregar_empaque_presentacion, o el
+        id_receta de "Información") terminaba agregando el ítem con
+        id=None sin ningún aviso. ProductoService trata ese id=None
+        como costo $0 en silencio (así apareció el $4.27 en vez de
+        $8.96: la receta se guardó sin id). Este método centraliza el
+        chequeo para que ningún punto de selección se olvide de
+        hacerlo.
+        """
+        id_valor = getattr(autocompletado, "obtener_id", lambda: None)()
+        if autocompletado.obtener() and not id_valor:
+            self._mostrar_error_paso(
+                f"Elegí {entidad} de la lista de sugerencias (no alcanza con escribir el nombre)."
+            )
+            return None
+        return id_valor
 
     # Nuevo método:
     def _actualizar_es_torta(self, e=None):
@@ -662,7 +698,9 @@ class ProductoWizard(ft.Container):
         if not nombre:
             return
 
-        id_activo = getattr(self.autocompletado_presentacion_empaque, "obtener_id", lambda: None)()
+        id_activo = self._obtener_id_seleccionado(self.autocompletado_presentacion_empaque, "el empaque")
+        if not id_activo:
+            return
         try:
             cantidad = float(self.txt_presentacion_empaque_cantidad.value or 1) or 1
         except ValueError:
@@ -721,19 +759,31 @@ class ProductoWizard(ft.Container):
 
         empaques = self._empaques_presentacion_actual.copy()
         precio_manual = (self.txt_presentacion_precio_manual.value or "").strip()
+        precio_manual_valido = None
         if precio_manual:
             try:
-                precio = float(precio_manual)
+                precio_manual_valido = float(precio_manual)
             except ValueError:
-                precio = 0.0
-        else:
-            precio = self._precio_sugerido_actual(fraccion, empaques)
+                precio_manual_valido = None
+
+        # ✅ "precio" sigue usándose para mostrar en la tabla y como
+        # precio de venta de esta presentación puntual (si el usuario
+        # no escribió nada, se muestra la preview del wizard como
+        # referencia). Pero "precio_manual" indica si ese valor vino
+        # realmente del usuario o es solo la estimación del wizard --
+        # eso es lo que decide, en _guardar(), si se le manda
+        # precio_venta al backend o se deja que calcule el suyo propio
+        # (ver _guardar: antes se mandaba siempre, pisando el precio
+        # correcto que arma el service con costo_receta + mano de obra
+        # + indirectos).
+        precio = precio_manual_valido if precio_manual_valido is not None else self._precio_sugerido_actual(fraccion, empaques)
 
         self.presentaciones.append({
             "nombre": nombre,
             "cantidad_unidades": unidades,
             "empaques": empaques,
             "precio": precio,
+            "precio_manual": precio_manual_valido is not None,
         })
         self.tabla_presentaciones.reemplazar(self._filas_presentaciones())
 
@@ -881,11 +931,13 @@ class ProductoWizard(ft.Container):
         nombre = self.autocompletado_componente.obtener()
         if not nombre:
             return
+        id_componente = self._obtener_id_seleccionado(self.autocompletado_componente, "el componente")
+        if not id_componente:
+            return
         try:
             cantidad = float(self.txt_componente_cantidad.value or 0)
         except ValueError:
             cantidad = 0
-        id_componente = getattr(self.autocompletado_componente, "obtener_id", lambda: None)()
         self.componentes.append({
             "tipo": (self.dd_tipo_componente.value or "Ingrediente").lower(),
             "nombre": nombre,
@@ -948,11 +1000,13 @@ class ProductoWizard(ft.Container):
         nombre = self.autocompletado_empaque.obtener()
         if not nombre:
             return
+        id_activo = self._obtener_id_seleccionado(self.autocompletado_empaque, "el empaque")
+        if not id_activo:
+            return
         try:
             cantidad = float(self.txt_empaque_cantidad.value or 1)
         except ValueError:
             cantidad = 1
-        id_activo = getattr(self.autocompletado_empaque, "obtener_id", lambda: None)()
         self.empaques.append({"nombre": nombre, "id_activo": id_activo, "cantidad": cantidad})
         self.tabla_empaques.reemplazar(self.empaques)
         self.autocompletado_empaque.limpiar()
@@ -1166,11 +1220,13 @@ class ProductoWizard(ft.Container):
         nombre = self.autocompletado_producto_combo.obtener()
         if not nombre:
             return
+        id_producto = self._obtener_id_seleccionado(self.autocompletado_producto_combo, "el producto")
+        if not id_producto:
+            return
         try:
             cantidad = float(self.txt_producto_combo_cantidad.value or 1)
         except ValueError:
             cantidad = 1
-        id_producto = getattr(self.autocompletado_producto_combo, "obtener_id", lambda: None)()
         self.productos_combo.append({"nombre": nombre, "id_producto": id_producto, "cantidad": cantidad})
         self.tabla_productos_combo.reemplazar(self.productos_combo)
         self.autocompletado_producto_combo.limpiar()
@@ -1360,13 +1416,18 @@ class ProductoWizard(ft.Container):
                 # Construir una única presentación
                 empaques = self._empaques_presentacion_actual
                 precio_manual = self.txt_presentacion_precio_manual.value.strip()
+                precio_manual_valido = None
                 if precio_manual:
                     try:
-                        precio = float(precio_manual)
+                        precio_manual_valido = float(precio_manual)
                     except ValueError:
-                        precio = self._precio_sugerido_actual(100, empaques)
-                else:
-                    precio = self._precio_sugerido_actual(100, empaques)
+                        precio_manual_valido = None
+
+                # "precio" es lo que se guarda en la presentación (manual
+                # si lo hay, si no la preview del wizard, solo para
+                # mostrar). precio_manual_valido es lo que decide si se
+                # manda precio_venta al backend.
+                precio = precio_manual_valido if precio_manual_valido is not None else self._precio_sugerido_actual(100, empaques)
 
                 presentacion = {
                     "nombre": "Torta completa" if self.dd_tipo_venta.value == "Completa" else "Trozo de torta",
@@ -1379,21 +1440,34 @@ class ProductoWizard(ft.Container):
                 datos["presentaciones"] = [presentacion]
                 # Los empaques consolidados para inventario se toman de la presentación
                 datos["empaques"] = self._consolidar_empaques_presentaciones()
-                # ✅ El precio de venta del producto es el de su única
-                # presentación (antes esto no se mandaba y el
-                # precio_final terminaba siendo siempre el calculado,
-                # ignorando lo que el usuario tipeó acá).
-                datos["precio_venta"] = presentacion["precio"]
+                # ✅ Solo mandamos precio_venta si el usuario realmente
+                # escribió un precio manual. Antes se mandaba SIEMPRE
+                # (incluso vacío -> usaba _precio_sugerido_actual, el
+                # preview del wizard), y ProductoService lo tomaba como
+                # decisión final e inapelable del usuario, pisando el
+                # precio_sugerido correcto que el backend calcula con
+                # costo_receta + mano de obra + costos indirectos +
+                # margen. Si no hay precio manual, dejamos que el
+                # backend calcule y use su propio precio_sugerido fresco
+                # -- igual que ya se hacía para "elaborado".
+                if precio_manual_valido is not None:
+                    datos["precio_venta"] = precio_manual_valido
             else:
                 datos["presentaciones"] = self.presentaciones
                 datos["empaques"] = self._consolidar_empaques_presentaciones()
                 # ✅ Con varias presentaciones no hay "un" precio único;
-                # usamos el de la primera como precio de referencia del
+                # si el usuario fijó un precio manual para la primera
+                # presentación, lo usamos como precio de referencia del
                 # producto (el que se ve en la tarjeta del catálogo y el
                 # que se usa si este producto se incluye en un combo o
                 # como subproducto de otro elaborado). La venta real de
                 # cada presentación sigue usando su propio precio.
-                if self.presentaciones:
+                # Si esa primera presentación NO tiene precio manual
+                # (precio_manual=False, ver _agregar_presentacion), su
+                # "precio" es solo la preview del wizard -- no lo
+                # mandamos como precio_venta para no pisar el
+                # precio_sugerido correcto que calcula el backend.
+                if self.presentaciones and self.presentaciones[0].get("precio_manual"):
                     datos["precio_venta"] = self.presentaciones[0].get("precio")
 
         elif self.tipo == "elaborado":

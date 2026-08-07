@@ -407,17 +407,29 @@ class ProductoService(CRUDService):
         return round(total, 2)
 
     def _calcular_costo_receta(self, receta_id: int) -> float:
+        # ✅ ProductoService NO calcula el costo de materia prima -- ese
+        # cálculo es responsabilidad exclusiva de RecetasService, que ya
+        # lo hace (vía calcular_subtotal, con fracción de paquete,
+        # conversión de unidades, etc.) y lo persiste en la columna
+        # costo_ingredientes de la receta al crear/actualizarla. Acá
+        # solo se busca ese valor ya calculado y se usa tal cual.
+        #
+        # (Antes esto reimplementaba el costeo a mano como
+        # cantidad_necesaria * costo_unitario directo sobre las filas
+        # receta/ingrediente, que nunca traen "costo_unitario" -- ese
+        # dato vive en el catálogo de ingredientes, no en la receta.
+        # Como la clave no existía, el resultado era siempre $0 de
+        # materia prima, sin ningún error visible. Reemplazado primero
+        # por una llamada a calcular_subtotal() acá mismo, pero eso
+        # duplicaba en ProductoService un cálculo que ya vive en
+        # RecetasService -- ahora se usa el costo ya persistido.)
         if not receta_id:
             return 0.0
         resultado = self._recetas.obtener(receta_id)
         if resultado.fallo:
             return 0.0
-        ingredientes = resultado.datos.get("ingredientes", [])
-        total = sum(
-            float(ing.get("cantidad_necesaria", 0)) * float(ing.get("costo_unitario", 0))
-            for ing in ingredientes
-        )
-        return round(total, 2)
+        receta = resultado.datos.get("receta") or {}
+        return round(float(receta.get("costo_ingredientes", 0) or 0), 2)
 
     # ============================================================
     # UNIDADES DE COMPONENTES (coherencia de magnitud + conversión)
